@@ -17,12 +17,13 @@ public sealed record SyntheticState(int Node, SyntheticLevel Level);
 // 操作 = 走到相邻节点
 public sealed record SyntheticMove(int To);
 
-// 可注入的故障模式：验证内核对适配层异常的处理路径（故障注入实验同源）
+// 可注入的故障模式：验证内核对适配层异常与跨次运行不稳定性的处理路径（故障注入实验同源）
 public enum SyntheticFailure
 {
-    None,             // 正常
-    ThrowOnLoad,      // LoadLevel 抛非参数异常
-    ThrowOnApply      // ApplyMove 抛异常
+    None,                  // 正常
+    ThrowOnLoad,           // LoadLevel 抛非参数异常
+    ThrowOnApply,          // ApplyMove 抛异常
+    FlipMoveOrderPerLoad   // 第二次加载起合法操作顺序翻转（模拟跨次运行的隐藏状态泄漏）
 }
 
 // 有向图适配器：邻接顺序 = 边声明顺序（保序），保证搜索确定性
@@ -33,6 +34,7 @@ public sealed class SyntheticGraphAdapter :
     private readonly ConditionalWeakTable<SyntheticLevel, Dictionary<int, List<int>>> _adjCache
         = new();                                                 // 按关卡实例缓存的邻接表（引用键，线程安全）
     private readonly SyntheticFailure _failure;                 // 注入的故障模式
+    private int _loadCount;                                      // LoadLevel 调用计数（FlipMoveOrderPerLoad 用）
 
     public SyntheticGraphAdapter(SyntheticFailure failure = SyntheticFailure.None)
     {
@@ -44,6 +46,7 @@ public sealed class SyntheticGraphAdapter :
     // 解析关卡并校验：起点/目标必须出现在图的节点集中（起点==目标除外），否则按契约抛 ArgumentException
     public SyntheticState LoadLevel(SyntheticLevel level)
     {
+        _loadCount++;
         if (_failure == SyntheticFailure.ThrowOnLoad)
         {
             throw new InvalidOperationException("注入：LoadLevel 失败");
@@ -66,9 +69,17 @@ public sealed class SyntheticGraphAdapter :
     public IReadOnlyList<SyntheticMove> GetLegalMoves(SyntheticState state)
     {
         var adj = AdjacencyOf(state.Level);
-        return adj.TryGetValue(state.Node, out var next)
-            ? next.Select(n => new SyntheticMove(n)).ToList()
-            : Array.Empty<SyntheticMove>();
+        if (!adj.TryGetValue(state.Node, out var next))
+        {
+            return Array.Empty<SyntheticMove>();
+        }
+        var moves = next.Select(n => new SyntheticMove(n)).ToList();
+        // 注入的跨次不稳定：偶数次加载后翻转顺序（同一次运行内仍稳定，双跑才暴露）
+        if (_failure == SyntheticFailure.FlipMoveOrderPerLoad && _loadCount % 2 == 0)
+        {
+            moves.Reverse();
+        }
+        return moves;
     }
 
     // 纯函数：非法操作（非相邻）抛异常；支持故障注入
