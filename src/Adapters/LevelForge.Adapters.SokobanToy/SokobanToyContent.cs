@@ -1,3 +1,5 @@
+using LevelForge.Kernel.Analysis;
+
 namespace LevelForge.Adapters.SokobanToy;
 
 // 玩具推箱子 · 内容资产：10 个预制关 + 接入产物（视觉映射/机制表/玩法文档/规则矩阵/格式说明书）
@@ -65,6 +67,14 @@ public static class SokobanToyContent
       ]
     }
     """;
+
+    // 默认难度权重：MVP 固定权重形态（难度校准 §2），模型版本随结论输出；运营期拟合后置
+    // 阈值按 10 个预制关的解长分布手工设定（属"分布对齐"的 30 分钟手工环节），非玩家校准结果
+    public static readonly DifficultyWeights DefaultDifficultyWeights = new(
+        "sokoban-toy", "sokoban-fixed-v1",
+        SolutionLengthWeight: 1.0,
+        BranchingWeight: 0.5,
+        Thresholds: [4.0, 9.0]);
 
     #endregion
 

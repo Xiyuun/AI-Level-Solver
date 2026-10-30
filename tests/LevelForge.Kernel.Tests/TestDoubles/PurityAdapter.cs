@@ -26,7 +26,8 @@ public enum PurityDefect
 
 public sealed class PurityAdapter :
     IGameAdapter<PurityLevel, PurityState, PurityMove>,
-    IExecutionProtocol<PurityState, PurityMove>
+    IExecutionProtocol<PurityState, PurityMove>,
+    IMoveCategorizer<PurityMove>
 {
     private readonly PurityDefect _defect;           // 注入的缺陷
     private int _callCount;                          // 违规实现用的隐藏计数（本身就是反例）
@@ -129,6 +130,16 @@ public sealed class PurityAdapter :
             ["node"] = s.Node,
             ["log"] = new JsonArray(s.Log.Select(l => (JsonNode)l!).ToArray())
         };
+    }
+
+    #endregion
+
+    #region IMoveCategorizer
+
+    // 操作分类：偶数目标格记为道具操作（供特征提取的道具统计测试；玩具语义）
+    public MoveCategory Category(PurityMove m)
+    {
+        return m.To % 2 == 0 ? MoveCategory.Tool : MoveCategory.Normal;
     }
 
     #endregion

@@ -159,12 +159,12 @@ public class SokobanToyAdapterTests
         Assert.Equal(5, snap.Board.Width);
         Assert.Equal("player", snap.Entities[0].Id);
         Assert.Equal("box-0", snap.Entities[1].Id);
-        Assert.Equal(false, snap.Entities[1].Props!["onGoal"]!.GetValue<bool>());   // 未归位
+        Assert.False(snap.Entities[1].Props!["onGoal"]!.GetValue<bool>());   // 未归位
         Assert.Equal(0, snap.Globals["boxesOnGoal"]!.GetValue<int>());
         // 推到位后归位标志翻转
         var next = Adapter.ApplyMove(s, new SokobanMove(1, 0));
         var snap2 = Adapter.Snapshot(next);
-        Assert.Equal(true, snap2.Entities[1].Props!["onGoal"]!.GetValue<bool>());
+        Assert.True(snap2.Entities[1].Props!["onGoal"]!.GetValue<bool>());
         Assert.Equal(1, snap2.Globals["boxesOnGoal"]!.GetValue<int>());
     }
 
