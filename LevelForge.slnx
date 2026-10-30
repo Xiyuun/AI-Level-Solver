@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LevelForge.Kernel/LevelForge.Kernel.csproj" />
+    <Project Path="src/LevelForge.Platform/LevelForge.Platform.csproj" />
+  </Folder>
+  <Folder Name="/src/Adapters/">
+    <Project Path="src/Adapters/LevelForge.Adapters.SlidePig/LevelForge.Adapters.SlidePig.csproj" />
+    <Project Path="src/Adapters/LevelForge.Adapters.SokobanToy/LevelForge.Adapters.SokobanToy.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LevelForge.Adapters.SokobanToy.Tests/LevelForge.Adapters.SokobanToy.Tests.csproj" />
+    <Project Path="tests/LevelForge.Kernel.Tests/LevelForge.Kernel.Tests.csproj" />
+  </Folder>
+</Solution>

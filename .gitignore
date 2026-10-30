@@ -1,0 +1,19 @@
+# .NET 构建产物
+bin/
+obj/
+TestResults/
+*.user
+*.suo
+.vs/
+.idea/
+
+# 前端
+node_modules/
+web/dist/
+
+# 运行时本地数据（SQLite、磁带、关卡包、报告）
+data/
+
+# 系统杂项
+Thumbs.db
+.DS_Store

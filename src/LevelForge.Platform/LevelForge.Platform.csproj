@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\LevelForge.Kernel\LevelForge.Kernel.csproj" />
+    <ProjectReference Include="..\Adapters\LevelForge.Adapters.SokobanToy\LevelForge.Adapters.SokobanToy.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>
