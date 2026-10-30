@@ -9,7 +9,7 @@ public sealed record MoveRecord(
 
 // 搜索元数据：仅客观统计，不含难度评分；非默认全图统计（范围见 MetricsScope）
 public sealed record SearchMetrics(
-    long StatesExplored,          // 已展开状态数（出队并生成后继的数量）
+    long StatesExplored,          // 已出队并判定的状态数（目标在出队时判定，含目标本身）
     long UniqueStates,            // 去重后的已访问状态数（含前沿）
     long FrontierPeak,            // 前沿队列长度峰值
     long ElapsedMs,               // 求解耗时毫秒
