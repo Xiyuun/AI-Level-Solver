@@ -98,3 +98,19 @@ Platform（ASP.NET Core minimal API + Microsoft.Data.Sqlite）：
 - 注意：SQLite 包需经 nuget.config 镜像还原；表结构首次启动自动建。
 
 第 9~11 步要点分别在《生成端出题分析》《表现层_生成工作台§4.1/§4.2》《验证门》有逐条依据，开工时对照实现即可。
+
+## 八、已知坑与经验（原对话过程记录，避免新会话重踩）
+
+1. **NuGet 直连不稳**：nuget.org 从本网络下载会 "EOF from transport stream"，仓库 nuget.config 已配华为云镜像优先；测试类包首次还原慢（分钟级），成功后进全局缓存就快了。
+2. **本机 Git 是 2.21（2019 年）**：不支持 `git init -b`；credential manager 老，GitHub 推送用 PAT（用户已走 PAT 流程，凭据已缓存）。
+3. **上级目录有个误建的空 .git**：LevelForge_glm 内层仓库优先级更高，不影响操作，别去动它。
+4. **ZCode 的 bash 偶发把命令和 shell 钩子串线报 exit 127**：原样重跑一遍命令即可，不是仓库问题。
+5. **改文件用编辑工具整体重写，别用 sed 改代码文件**（曾把测试文件改坏过一次）。
+6. **SDK 10 的 JsonNode 没有 DeepCopy 扩展**：用 CanonicalJson.Canonicalize 代替（它本来就产出独立副本）。
+7. **曾由测试抓出的 bug**（保持这种"测试先红"的敏感度）：校验器在非矩形网格上越界（已加 ragged 守卫）；toy-005 关卡数据笔误目标数少 1。
+8. **用户协作偏好**：授权全权实现、逐步推进，不需事事确认；设计文档一律不改；时间由用户灵活安排（额度可能随时中断——所以每步必须停在可提交边界）。
+9. **PROGRESS.md 维护规则**：每完成一步 commit 时，同步更新第二节进度表与第七节"下一步要点"，然后 push。
+
+## 九、新会话开场白（复制即用）
+
+> 读 D:\...\LevelForge_glm\PROGRESS.md（重点是二、三、五、七、八节），再读上级目录的《方案书.md》。当前阶段 B 第 8 步起。遵守第五节工作约定，从第 8 步继续，每步测试全绿后 commit 并更新 PROGRESS.md。
