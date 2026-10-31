@@ -68,3 +68,28 @@ public sealed record PhraseCreateDto(string Text);
 
 // 短语项
 public sealed record PhraseDto(long Id, string Text, int SortOrder);
+
+// ---- 生成 ----
+
+// 生成请求：目标难度 1/2/3；预算参数可空（缺省用设置页默认值）
+public sealed record GenerateRequestDto(
+    string? GameId,
+    int TargetDifficulty,
+    string? LevelNumber = null,
+    string? SpecialRequirements = null,
+    int? CandidateLimit = null,
+    long? SolveTimeoutMs = null);
+
+// 生成候选项（响应形态；contentJson 为提取后的候选原文）
+public sealed record CandidateAttemptDto(
+    int AttemptIndex, string? ContentJson, string FailureClass, string? FailureDetail,
+    int? DifficultyBand, double? DifficultyScore, long? SolveRunId, long? TapeId,
+    int LlmCalls, long ElapsedMs);
+
+// 生成运行详情（POST /api/generate 响应与 GET /api/generation/runs/{id} 共用）
+public sealed record GenerationRunDto(
+    long RunId, string GameId, string Status, int TargetDifficulty,
+    string? LevelNumber, string? SpecialRequirements,
+    int CandidateLimit, long SolveTimeoutMs, string PromptVersion,
+    IReadOnlyList<CandidateAttemptDto> Candidates,
+    int? AdoptedAttempt, string? FailureSummary, long TotalElapsedMs);

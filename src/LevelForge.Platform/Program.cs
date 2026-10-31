@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using LevelForge.Platform.Api;
 using LevelForge.Platform.Database;
 using LevelForge.Platform.Facades;
+using LevelForge.Platform.Generation;
 using LevelForge.Platform.Llm;
 using LevelForge.Platform.Storage;
 
@@ -21,6 +22,9 @@ builder.Services.AddSingleton<GameStore>();
 builder.Services.AddSingleton<SolveRunStore>();
 builder.Services.AddSingleton<PhraseStore>();
 builder.Services.AddSingleton<TapeStore>();
+builder.Services.AddSingleton<GenerationStore>();
+builder.Services.AddSingleton<FewShotSelector>();
+builder.Services.AddSingleton<GenerationPipeline>();
 builder.Services.AddHttpClient<LlmClient>();            // LLM 客户端：OpenAI 兼容协议，实例自带 key
 
 #endregion
@@ -45,6 +49,7 @@ GameEndpoints.Map(app);
 SolveEndpoints.Map(app);
 SettingsEndpoints.Map(app);
 PhraseEndpoints.Map(app);
+GenerationEndpoints.Map(app);
 
 // 根路径：服务标识（第 12 步起改为托管 web/ 前端构建产物）
 app.MapGet("/", () => Results.Ok(new { name = "LevelForge Platform", status = "running" }));

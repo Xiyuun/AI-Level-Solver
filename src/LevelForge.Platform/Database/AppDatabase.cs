@@ -207,12 +207,13 @@ public sealed class AppDatabase
         );
         """,
         // 生成候选：逐次尝试的原生内容 + 失败分类（观测落库，供失败原因 Top 榜）
+        // content_json 可空：api_error（调用失败无内容）与"输出中无 JSON"的 format_invalid 候选没有内容
         """
         CREATE TABLE IF NOT EXISTS generation_candidates (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           run_id INTEGER NOT NULL REFERENCES generation_runs(id),
           attempt_index INTEGER NOT NULL,
-          content_json TEXT NOT NULL,
+          content_json TEXT,
           failure_class TEXT NOT NULL,
           failure_detail TEXT,
           difficulty_band INTEGER,

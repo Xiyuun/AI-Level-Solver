@@ -54,6 +54,12 @@ public sealed class SokobanToyFacade : IGameFacade
         }
     }
 
+    // 静态格式校验：直用接入产物校验器（生成端出题分析 §3.2：只判格式不判可解性）
+    public IReadOnlyList<string> FormatErrors(string levelJson)
+    {
+        return SokobanToyValidator.ValidateJson(levelJson).Errors;
+    }
+
     // 求解 + 制带 + 难度评估：JSON 解析失败 → Invalid；有解 → 录制磁带；难度走固定权重模型
     public PlatformSolve Solve(SolveCommand command)
     {

@@ -16,6 +16,8 @@ public interface IGameFacade
 
     string? TryGetLevelId(string levelJson);                     // 从原生 JSON 提取关卡编号；无该字段返回 null
 
+    IReadOnlyList<string> FormatErrors(string levelJson);        // 静态格式校验（接入产物校验器；生成端判卷第一步）
+
     PlatformSolve Solve(SolveCommand command);                   // 求解 + 制带 + 难度评估
 }
 
