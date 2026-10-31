@@ -10,5 +10,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/LevelForge.Adapters.SokobanToy.Tests/LevelForge.Adapters.SokobanToy.Tests.csproj" />
     <Project Path="tests/LevelForge.Kernel.Tests/LevelForge.Kernel.Tests.csproj" />
+    <Project Path="tests/LevelForge.Platform.Tests/LevelForge.Platform.Tests.csproj" />
   </Folder>
 </Solution>
