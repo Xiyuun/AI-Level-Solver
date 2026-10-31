@@ -21,9 +21,9 @@ LevelForge = "LLM 出题 + 确定性求解器验题"的关卡生产线 + 半天�
 | 6 | 玩具推箱子适配层（含10关） | ✅ | a7653bd |
 | 7 | 难度特征提取与固定权重模型 | ✅ | 3c92d41 |
 | 8 | 平台服务骨架与SQLite数据模型 | ✅ | d469d04 |
-| 9 | 生成流水线（LLM出题→校验→判卷→重生） | ✅ | 见 git log |
-| **10** | **质检模式+安全落盘+执行确认** | **▶ 下一步** | |
-| 11 | 三道门编排（门1/门2对拍/门3基准diff+指纹失效） | 待做 | |
+| 9 | 生成流水线（LLM出题→校验→判卷→重生） | ✅ | 4da396f |
+| 10 | 质检模式+安全落盘+执行确认 | ✅ | （step10 提交） |
+| **11** | **三道门编排（门1/门2对拍/门3基准diff+指纹失效）** | **▶ 下一步** | |
 | 12 | 前端骨架+SVG通用渲染器+顶栏玩法切换 | 待做 | |
 | 13 | 生成工作台页面 | 待做 | |
 | 14 | 接入向导（薄页面版）+设置页 | 待做 | |
@@ -33,7 +33,7 @@ LevelForge = "LLM 出题 + 确定性求解器验题"的关卡生产线 + 半天�
 | 18 | 批量生产（P1） | 待做 | |
 | 19 | 自包含打包与发布 | 待做 | |
 
-验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过，然后单独 commit。当前基线：**145 测试全绿**（78 内核 + 31 玩具 + 36 平台）。
+验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过，然后单独 commit。当前基线：**155 测试全绿**（78 内核 + 31 玩具 + 46 平台）。
 
 ## 三、冻结的技术决策（不再讨论，直接执行）
 
@@ -78,9 +78,15 @@ src/LevelForge.Platform/            平台（ASP.NET Core minimal API + Microsof
   Generation/ GenerationPipeline（出题→格式修复≤2→求解判卷→难度评估→分类回填重生；API失败与内容失败分开）/
               PromptBuilder（系统提示词=规则书+格式说明书；few-shot+参数+失败反馈；版本 v1）/
               FewShotSelector（按同难度档采样2~3个，进程内缓存）/ GenerationModels（失败分类+反馈文案：只给已验证事实）
+  Adoption/   AdoptionService（落盘→幂等短路→模型验证→levels登记→旧确认失效→待确认登记；文件核对 ok/missing/hashChanged）
+  Storage/    LevelFileStore（安全落盘六条流程：冻结产物/限定目录/冲突旧指纹复查/临时文件原子发布/最终核对/
+              同编号写串行化）+ ILevelFileIO 接缝（故障注入测试用）+ TapeStore（+FindByRun）
+  Database/   ConfirmationStore（五态状态机：pending/running/passed/failed/invalidated + 人工降级/报告导入）/
+              BaselineStore（版本维度唯一，幂等追加，不静默覆盖）
   Api/        GameEndpoints（列表/详情/切换/关卡）/ SolveEndpoints（存量关+质检粘贴同一入口、磁带获取）/
               SettingsEndpoints（读写+LLM测试连接）/ PhraseEndpoints（短语 CRUD）/
-              GenerationEndpoints（POST /api/generate 同步整轮 + 运行历史查询）
+              GenerationEndpoints（POST /api/generate 同步整轮 + 运行历史查询）/
+              AdoptionEndpoints（adopt/确认列表/人工结论/报告导入/入基准/基准列表）
 tests/LevelForge.Kernel.Tests/      内核自测（含 TestDoubles：SyntheticGraphAdapter 无状态图适配器，
                                     SyntheticFailure 枚举注入故障；PurityAdapter 带三种纯度缺陷+分类器）
 tests/LevelForge.Adapters.SokobanToy.Tests/
@@ -103,15 +109,15 @@ web/ skills/ harness-templates/     占位，第12/15步建设
 3. Git：仓库级 .git/config 已写身份（邓翔）；GitHub 凭据已由用户手动 push 一次完成缓存，后续可直接 `git push origin master`。
 4. 仓库根执行 `bash build.sh`：当前 145 测试全绿即环境就绪。
 
-## 七、第 10 步设计要点（下一步开工即用）
+## 七、第 11 步设计要点（下一步开工即用）
 
-质检模式收口 + 原生格式安全落盘 + 执行确认（《表现层_生成工作台》§4.1/§4.2 逐条依据）：
-- **质检模式已有求解入口**（第8步 POST /api/solve levelJson）；第10步补处置两条路：仅查看（无后效）/ 采纳落盘（同一落盘流程，单关/质检/批量共用）。
-- **安全落盘六条流程**（§4.1）：①冻结产物（写入经模型验证的原始候选而非试玩中途态；文件名与内部编号一致；记录拟写入字节 levelHash）②限定目录（目标必须在解析后的关卡根目录内，拒绝绝对路径注入/路径穿越/符号链接跳出；服务端执行）③编号冲突（默认不覆盖；替换显示旧指纹+提交前复查+同编号写串行化）④防半写（同目录临时文件→写完校验格式与内容哈希→原子替换；失败不破坏原文件、不登记成功）⑤核对最终文件（重读已发布文件，levelHash 与候选一致；针对最终内容保持/重新取得模型验证）⑥推进生命周期（落盘只登记"待执行确认"，人工确认才入基准）。
-- **跨存储无隐含事务**：落盘成功但登记失败→标"待恢复"，按任务号+levelHash 恢复登记，不重复写盘；登记成功但文件缺失/被改→标异常。
-- **执行确认卡**（§4.2）：POST /api/adopt 落盘+登记 execution_confirmations(pending)；导入执行报告（校验报告与当前文件 levelHash/版本匹配，不匹配拒绝）；人工降级（注明"仅最终结果"）；"确认加入基准"仅在当前文件模型验证有效+游戏执行通过时启用→写 baselines（版本追加不覆盖，重复确认不重复追加）；状态机 pending/running/passed/failed/invalidated，levelHash 变化使旧确认失效。
-- 玩具门2不适用：执行确认走"人工降级"路径演示完整生命周期；真机执行入口留给门2执行器（第11步）。
-- **防线反向验证测试**（约定3）：路径穿越必须被拒、半写中断原文件完好、指纹不符拒绝确认/入基准、重复采纳同一文件不重复写盘/追加。
+三道门编排（《验证门》逐条依据；内核 AdapterHosting 已备五项检查，第10步已备基准/确认/磁带）：
+- **门1 运行卡**：POST /api/games/{id}/gates/1/run —— 组装 HostingCheckInput（依赖扫描/键判别样本/纯函数样本/确定性关卡均取自适配层注册内容），调 AdapterHosting.RunAll，全绿零豁免才 pass；结果落 verification_records（gate1，指纹字段 adapter_hash/kernel_ver/contract_ver + samples + summary）。玩具可全绿（纯逻辑适配层天然合规）。
+- **门2 对拍执行器**：驱动配置（命令模板+参数占位：{levelFile} {tapeFile} {outputFile}，产出物⑦）存 games 表（加列 gate2_driver_json）；流程=写输入包（磁带 JSON+关卡文件+资源条件）→ 拉起子进程（超时 kill 标 timeout）→ 读 result.json → 核对加载文件 levelHash → 逐步语义比对（初始不一致=第0步；首分歧步+字段）→ 胜负核对 → 结论落 verification_records（gate2，含 game_build_fingerprint/harness_hash/semantic_schema_ver/样本清单）。**玩具 gate2Applicable=false → 返回"不适用"不跑**。比对器（磁带 vs 报告）独立可测：用假报告驱动（一致→pass；中步分歧→报首分歧步）。
+- **门3 基准 diff**：POST /api/games/{id}/gates/3/run —— 全量求解该玩法 levels，与 baselines 按（levelId + 当前 adapter_hash + kernel_ver）对照，按《验证门》§5.2 语义分级：结论/解长一致=match；solved↔unsolvable 变化=**红灯**；同结论同解长但 trajectoryHash 变=黄灯（路径差异待核对）；statesExplored 大变=性能单列；无基准=新关待确认集合。**门3 新跑结果不自动入基准**（不能自动成为自己的预期）。结果落 verification_records（gate3，样本清单+diff summary）。
+- **指纹失效口径**：所有验证记录查询带指纹字段；基准 diff 先核对 adapter_hash+kernel_ver 再定位责任方（§9.3）。
+- API：GET /api/games/{id}/verification-records。
+- 测试：门1玩具全绿+落记录；门2比对器（一致/首分歧/第0步）；门2不适用路径；门3 全 match（先 adopt+approve 造基准）、红灯（插入差异基准）、新关待确认。
 
 ## 八、已知坑与经验（原对话过程记录，避免新会话重踩）
 
