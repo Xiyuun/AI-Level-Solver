@@ -23,9 +23,9 @@ LevelForge = "LLM 出题 + 确定性求解器验题"的关卡生产线 + 半天�
 | 8 | 平台服务骨架与SQLite数据模型 | ✅ | d469d04 |
 | 9 | 生成流水线（LLM出题→校验→判卷→重生） | ✅ | 4da396f |
 | 10 | 质检模式+安全落盘+执行确认 | ✅ | a7a605f |
-| 11 | 三道门编排（门1/门2对拍/门3基准diff+指纹失效） | ✅ | （step11 提交） |
-| **12** | **前端骨架+SVG通用渲染器+顶栏玩法切换** | **▶ 下一步** | |
-| 13 | 生成工作台页面 | 待做 | |
+| 11 | 三道门编排（门1/门2对拍/门3基准diff+指纹失效） | ✅ | d49677c |
+| 12 | 前端骨架+SVG通用渲染器+顶栏玩法切换 | ✅ | （step12 提交） |
+| **13** | **生成工作台页面** | **▶ 下一步** | |
 | 14 | 接入向导（薄页面版）+设置页 | 待做 | |
 | 15 | 接入套件skill九件套 | 待做 | |
 | 16 | 滑动猪真实接入（适配层+rule-matrix+harness+三门） | 待做（需用户提供滑动猪仓库/Unity环境） | |
@@ -33,7 +33,7 @@ LevelForge = "LLM 出题 + 确定性求解器验题"的关卡生产线 + 半天�
 | 18 | 批量生产（P1） | 待做 | |
 | 19 | 自包含打包与发布 | 待做 | |
 
-验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过，然后单独 commit。当前基线：**164 测试全绿**（78 内核 + 31 玩具 + 55 平台）。
+验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过（含前端 vitest），然后单独 commit。当前基线：**188 测试全绿**（78 内核 + 31 玩具 + 55 平台 + 24 前端）。
 
 ## 三、冻结的技术决策（不再讨论，直接执行）
 
@@ -95,7 +95,13 @@ tests/LevelForge.Kernel.Tests/      内核自测（含 TestDoubles：SyntheticGr
                                     SyntheticFailure 枚举注入故障；PurityAdapter 带三种纯度缺陷+分类器）
 tests/LevelForge.Adapters.SokobanToy.Tests/
 tests/LevelForge.Platform.Tests/    平台测试（PlatformFactory 临时数据目录隔离；stub LLM 脚本驱动生成流水线）
-web/ skills/ harness-templates/     占位，第12/15步建设
+web/                                前端（Vite+React+TS，npmmirror 镜像）
+  src/renderer/  model.ts(类型镜像) / project.ts(投影纯函数核心：快照×映射→画面项，灰兜底+告警) /
+                 tween.ts(同id插值/淡入淡出/frameAt 进度接口) / BoardSvg.tsx(SVG薄层：4形状/图标白名单/
+                 arrow·badge·tint props/明暗主题/实体点击回调) + vitest 24 测试
+  src/api/client.ts  平台 API 薄封装（camelCase 类型与后端一致）
+  src/App.tsx        骨架页：顶栏玩法切换 + 关卡预览纵向切片（求解→磁带→渲染→播放/单步/重置）
+skills/ harness-templates/          占位，第15步建设
 ```
 
 ## 五、工作约定（新会话必须遵守）
@@ -108,22 +114,23 @@ web/ skills/ harness-templates/     占位，第12/15步建设
 
 ## 六、新设备环境准备
 
-1. .NET SDK 10（10.0.201+）：本机已装 **10.0.403 用户级** `%USERPROFILE%\.dotnet`；bash 里跑 dotnet 需前缀 `PATH="$HOME/.dotnet:$PATH" DOTNET_ROOT="$HOME/.dotnet"`。
-2. Node.js 24+：**未装**，第 12 步前端开工前安装。
-3. Git：仓库级 .git/config 已写身份（邓翔）；GitHub 凭据已由用户手动 push 一次完成缓存，后续可直接 `git push origin master`。
-4. 仓库根执行 `bash build.sh`：当前 145 测试全绿即环境就绪。
+1. .NET SDK 10：已装 **10.0.403 用户级** `%USERPROFILE%\.dotnet`；Node.js：已装 **24.22.2 用户级** `%USERPROFILE%\nodejs`——build.sh/build.cmd 已自动把它们加进 PATH，直接跑即可。
+2. Git：仓库级 .git/config 已写身份（邓翔）；GitHub 凭据已缓存。
+3. 仓库根执行 `bash build.sh`：188 测试全绿（含前端）即环境就绪。
+4. 前端开发：`cd web && npm run dev`（Vite 5173，代理 /api → localhost:5000）；平台 `dotnet run --project src/LevelForge.Platform --urls http://localhost:5000`。
 
-## 七、第 12 步设计要点（下一步开工即用）
+## 七、第 13 步设计要点（下一步开工即用）
 
-前端骨架 + SVG 通用渲染器 + 顶栏玩法切换（《渲染器与视觉映射规范》为逐条依据，开工先细读）：
-- **先装 Node 24**：用户级（解压 zip 到 `%USERPROFILE%\node` + PATH 前缀，不动系统；与 SDK 同模式）。
-- **web/ 初始化**：Vite + React + TS（`npm create vite@latest` 模板 react-ts）；目录：`src/renderer/`（通用渲染器）、`src/api/`（平台 API client）、`src/pages/`；npm 依赖走 npmmirror 镜像（`.npmrc`）。
-- **通用渲染器**（核心承诺：新游戏零前端代码）：纯函数组件 `快照 SceneSnapshot × 视觉映射 VisualMapping → SVG`；映射纯数据声明（cellTypes/entityTypes/globalFields：shape/fill/icon/size/props 条件着色）；动画由磁带相邻快照补间；刻意不模仿游戏 UI（每项目一份前端=破坏零前端承诺）。玩具映射已在 SokobanToyContent.VisualMapping 可直接当测试样本。
-- **磁带消费**：GET /api/tapes/{id} → 初始帧+逐步快照；回放=按步切快照+补间（播放/单步/重置，第13步接控制条）。
-- **顶栏玩法切换**：GET /api/games（含 statusName/gate2Applicable 标识）→ 下拉；PUT activate 切换。
-- **前端测试进验收**：vitest（渲染器纯函数单测：给定快照+映射断言 SVG 结构/样式映射/未知类型降级）；`build.sh` 增加"存在 web/ 且有 node 时跑 npm ci+npm test"分支。
-- **托管**：Platform 增加 wwwroot 服务 `web/dist`（SPA fallback 到 index.html）；开发期 Vite proxy 到 localhost:5xxx→后端端口。
-- 试用态水印/工作台页面留第13步；本步只做骨架+渲染器+切换。
+生成工作台页面（《表现层_生成工作台》逐条依据；第 12 步骨架已备渲染器/切换/预览切片）：
+- **页面状态机**（§3）：空态 → 生成中（可取消）→ 成功态（回放⇄试玩互斥）/ 失败态（应用建议重试）；单候选失败不进失败态，只在日志与候选记录条可见。
+- **左列表单**（§1/§2）：难度三档大按钮（轻松/标准/烧脑）、关卡编号（下方灰字显示机制范围提示——GET 详情的 mechanics）、特殊要求文本框+短语库入口（GET/POST/DELETE phrases）、高级选项折叠（候选上限/单候选求解超时，默认取 settings gen.*）、生成/取消按钮。
+- **流水线日志**（§1⑩）：五色角色标签行（LLM 蓝/求解器紫/难度模型橙/约束绿/集成青）；MVP 用轮询（POST /api/generate 同步返回后一次性呈现全程记录 + 按候选展开明细），实时流水（SSE）后置——注意失败候选与重生触发全部可见。
+- **结果区**：指标条（难度目标vs评估/解长及最优性/尝试次数/耗时）、候选记录条（逐次结论五类）、棋盘预览+解法回放（第12步 BoardSvg/帧驱动直接复用；回放模式显示播放控制条，试玩模式第13步接后端步进 API——**试玩需要新后端端点：POST /api/play 合法动作枚举+执行返回快照**，走适配层与求解同源）、深度分析整体后置不展示入口。
+- **失败态**（§5）：三段式报告（逐候选失败分类+结论"候选已耗尽（3/3）——本次预算内未生成…"+建议自动应用重试：提高候选/加超时/降难度，被自动调整字段高亮可还原；自动重试仍失败停留失败态）。
+- **采纳落盘**（§4.1 已有后端）：二次确认弹窗（编号/评估/解长/路径/指纹）→ POST /api/adopt → 按钮变"已落盘，待游戏确认"；执行确认卡（§4.2 后端已有）：确认列表+人工降级录入+导入报告+确认入基准；下载 JSON（前端 blob）。
+- **质检模式**（§1 验证关卡）：粘贴原生 JSON → POST /api/solve levelJson → 复用结果展示；"仅查看/采纳落盘"两条路。
+- **试用态水印**：玩法 status=trial 时结果区顶部琥珀警示条（生产中不显示）。
+- 前端测试：vitest 扩展——状态机流转纯函数、失败反馈→建议映射、（可测的）组件逻辑抽纯函数测；后端步进 API 加平台测试。
 
 ## 八、已知坑与经验（原对话过程记录，避免新会话重踩）
 
