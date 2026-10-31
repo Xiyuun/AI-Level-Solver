@@ -9,6 +9,7 @@ public sealed record GameRow(
     string LevelsRoot, bool Gate2Applicable,
     string VisualMappingJson, string MechanicsJson, string GameBrief, string FormatSpec,
     string RuleMatrix, string DifficultyWeightsJson,
+    string? Gate2DriverJson,
     string RegisteredAt, string UpdatedAt, long LevelCount);
 
 // 关卡行：levels 表整行
@@ -131,6 +132,7 @@ public sealed class GameStore
                 reader.GetString(reader.GetOrdinal("format_spec")),
                 reader.GetString(reader.GetOrdinal("rule_matrix")),
                 reader.GetString(reader.GetOrdinal("difficulty_weights_json")),
+                reader.IsDBNull(reader.GetOrdinal("gate2_driver_json")) ? null : reader.GetString(reader.GetOrdinal("gate2_driver_json")),
                 reader.GetString(reader.GetOrdinal("registered_at")),
                 reader.GetString(reader.GetOrdinal("updated_at")),
                 reader.GetInt64(reader.GetOrdinal("level_count"))));

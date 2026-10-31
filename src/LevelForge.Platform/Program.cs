@@ -4,6 +4,7 @@ using LevelForge.Platform.Adoption;
 using LevelForge.Platform.Api;
 using LevelForge.Platform.Database;
 using LevelForge.Platform.Facades;
+using LevelForge.Platform.Gates;
 using LevelForge.Platform.Generation;
 using LevelForge.Platform.Llm;
 using LevelForge.Platform.Storage;
@@ -30,6 +31,8 @@ builder.Services.AddSingleton<ILevelFileIO, FileLevelFileIO>();   // 文件 IO �
 builder.Services.AddSingleton<LevelFileStore>();
 builder.Services.AddSingleton<ConfirmationStore>();
 builder.Services.AddSingleton<BaselineStore>();
+builder.Services.AddSingleton<VerificationRecordStore>();
+builder.Services.AddSingleton<GateService>();
 builder.Services.AddSingleton<AdoptionService>();
 builder.Services.AddHttpClient<LlmClient>();            // LLM 客户端：OpenAI 兼容协议，实例自带 key
 
@@ -57,6 +60,7 @@ SettingsEndpoints.Map(app);
 PhraseEndpoints.Map(app);
 GenerationEndpoints.Map(app);
 AdoptionEndpoints.Map(app);
+GateEndpoints.Map(app);
 
 // 根路径：服务标识（第 12 步起改为托管 web/ 前端构建产物）
 app.MapGet("/", () => Results.Ok(new { name = "LevelForge Platform", status = "running" }));

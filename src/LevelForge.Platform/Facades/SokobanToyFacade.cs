@@ -4,6 +4,7 @@ using LevelForge.Adapters.SokobanToy;
 using LevelForge.Kernel.Analysis;
 using LevelForge.Kernel.Contracts;
 using LevelForge.Kernel.Executor;
+using LevelForge.Kernel.Hosting;
 using LevelForge.Kernel.Replay;
 using LevelForge.Kernel.Search;
 
@@ -91,6 +92,28 @@ public sealed class SokobanToyFacade : IGameFacade
         var features = FeatureExtractor.Extract(Bundle, result);
         var difficulty = DifficultyModel.Evaluate(features, result.Status, SokobanToyContent.DefaultDifficultyWeights);
         return new PlatformSolve(result, tape, difficulty, runConfigHash);
+    }
+
+    // 门1五项合规检查：组装本玩法样本（键判别维度对/纯函数样本/确定性关卡）后交 AdapterHosting
+    // 样本来源=适配层测试套件口径：维度对直接构造"仅该维度不同"的状态（验证门 §3.1）
+    public ComplianceReport RunGate1Checks()
+    {
+        var levelJson = SokobanToyContent.LevelJsons[0];   // toy-001：确定性检查代表关
+        var level = JsonSerializer.Deserialize<SokobanLevel>(levelJson, TapeJson.Options)!;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(levelJson);
+        var initial = AdapterInstance.LoadLevel(level);
+        // 键判别维度对：玩家位置 / 箱子位置（规则矩阵声明的全部状态维度）
+        var keySamples = new StatePairSample<SokobanState>[]
+        {
+            new("玩家位置", initial, initial with { Px = initial.Px + 1 }),
+            new("箱子位置", initial, initial with { Boxes = [..initial.Boxes.Select((b, i) => i == 0 ? (b.X + 1, b.Y) : b)] })
+        };
+        var input = new HostingCheckInput<SokobanLevel, SokobanState, SokobanMove>(
+            Bundle, typeof(SokobanToyAdapter).Assembly,
+            keySamples,
+            (initial, AdapterInstance.GetLegalMoves(initial)[0]),
+            level, bytes);
+        return new AdapterHosting().RunAll(input);
     }
 
     #region 内部工具

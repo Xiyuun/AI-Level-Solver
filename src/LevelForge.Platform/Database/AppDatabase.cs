@@ -79,6 +79,7 @@ public sealed class AppDatabase
           format_spec TEXT NOT NULL,
           rule_matrix TEXT NOT NULL,
           difficulty_weights_json TEXT NOT NULL,
+          gate2_driver_json TEXT,
           registered_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );

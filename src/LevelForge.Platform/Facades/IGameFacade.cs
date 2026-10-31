@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using LevelForge.Kernel.Analysis;
 using LevelForge.Kernel.Contracts;
 using LevelForge.Kernel.Hashing;
+using LevelForge.Kernel.Hosting;
 
 namespace LevelForge.Platform.Facades;
 
@@ -19,6 +20,8 @@ public interface IGameFacade
     IReadOnlyList<string> FormatErrors(string levelJson);        // 静态格式校验（接入产物校验器；生成端判卷第一步）
 
     PlatformSolve Solve(SolveCommand command);                   // 求解 + 制带 + 难度评估
+
+    ComplianceReport RunGate1Checks();                           // 门1五项合规检查（样本组装属玩法知识，收在门面内）
 }
 
 // 求解命令：原生关卡 JSON 原文 + 原始字节（levelHash 来源）+ 运行资源条件

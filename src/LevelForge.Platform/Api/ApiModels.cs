@@ -135,3 +135,35 @@ public sealed record BaselineDto(
     string Status, string Optimality, bool GraphComplete, string TerminationReason,
     int SolutionLength, long StatesExplored, string TrajectoryHash,
     string? ExecutionConfirmationRef, string? ApprovedBy, string? ApprovedAt, string CreatedAt);
+
+// ---- 三道门 ----
+
+// 门1运行结论（report 为五项检查明细）
+public sealed record Gate1RunResponseDto(long RecordId, bool Passed, JsonNode? Report);
+
+// 门2运行请求
+public sealed record Gate2RunRequestDto(string? LevelId);
+
+// 门2运行结论（执行层失败时 firstDivergenceStep 为 null 且 message 说明原因）
+public sealed record Gate2RunResponseDto(
+    long RecordId, bool Passed, string Message, string LevelId, string LevelHash,
+    int? FirstDivergenceStep, string? DivergenceDetail, bool? OutcomeMatch,
+    string? TapeOutcome, string? HarnessOutcome, string? GameBuildFingerprint);
+
+// 门3单关比对行
+public sealed record Gate3RowDto(
+    string LevelId, string LevelHash, string Verdict, string Status, string? BaselineStatus,
+    int SolutionLength, int? BaselineSolutionLength, string TerminationReason,
+    IReadOnlyList<string> Notes);
+
+// 门3运行结论（match/red/yellow/new 计数与逐关明细）
+public sealed record Gate3RunResponseDto(
+    long RecordId, int Total, int Matched, int Red, int Yellow, int NewLevels,
+    IReadOnlyList<Gate3RowDto> Rows);
+
+// 验证记录项（三道门历史，指纹字段按门依赖可空）
+public sealed record VerificationRecordDto(
+    long Id, string GameId, string Gate, string Verdict,
+    string? LevelHash, string? AdapterHash, string? KernelVer, string? ContractVer,
+    string? RuleMatrixHash, string? GameBuildFingerprint, string? HarnessHash,
+    int? SemanticSchemaVer, string? SamplesJson, string? SummaryJson, string ExecutedAt);
