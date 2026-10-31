@@ -54,6 +54,16 @@ var app = builder.Build();
 database.Initialize();
 GameSeeder.Seed(database, app.Services.GetRequiredService<GameRegistry>());
 
+// 前端构建产物托管（web/dist 存在时）：静态文件 + SPA fallback；开发期走 Vite dev server 代理
+var distDir = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "..", "web", "dist"));
+var hasDist = Directory.Exists(distDir);
+if (hasDist)
+{
+    var fileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(distDir);
+    app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
+}
+
 GameEndpoints.Map(app);
 SolveEndpoints.Map(app);
 SettingsEndpoints.Map(app);
@@ -62,8 +72,20 @@ GenerationEndpoints.Map(app);
 AdoptionEndpoints.Map(app);
 GateEndpoints.Map(app);
 
-// 根路径：服务标识（第 12 步起改为托管 web/ 前端构建产物）
-app.MapGet("/", () => Results.Ok(new { name = "LevelForge Platform", status = "running" }));
+if (hasDist)
+{
+    // SPA fallback：未知路径回 index.html（前端路由）
+    app.MapFallback(async (HttpContext ctx) =>
+    {
+        ctx.Response.ContentType = "text/html; charset=utf-8";
+        await ctx.Response.SendFileAsync(Path.Combine(distDir, "index.html"));
+    });
+}
+else
+{
+    // 无前端产物时根路径返回服务标识
+    app.MapGet("/", () => Results.Ok(new { name = "LevelForge Platform", status = "running" }));
+}
 
 #endregion
 
