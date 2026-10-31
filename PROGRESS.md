@@ -2,8 +2,8 @@
 
 > 用途：本文件供**新的 AI 会话/协作者**在本仓库上无缝接续实现工作。它承载"只存在于原对话中"的工作记忆：进度、计划、决策与约定。
 > 配套阅读：上级目录的 14 份设计文档（v0.2 修订版，方案书.md 为总纲）——设计文档已定稿，一律不改，按文档语义实现。
-> 最后更新：第 9 步完成后。
-> 范围决定（2026-10-31，用户拍板）：**本设备做到第 15 步为止**——第 16 步需滑动猪仓库/Unity 环境，当前设备没有；16~19 步待回到有猪项目的环境再继续。
+> 最后更新：第 15 步完成后。
+> 范围决定（2026-10-31，用户拍板）：**本设备做第 0~15 步**——已全部完成 ✅。第 16 步起需滑动猪仓库/Unity 环境，待回到有猪项目的设备再继续（直接读本文件接续即可）。
 
 ## 一、项目一句话
 
@@ -27,13 +27,13 @@ LevelForge = "LLM 出题 + 确定性求解器验题"的关卡生产线 + 半天�
 | 12 | 前端骨架+SVG通用渲染器+顶栏玩法切换 | ✅ | （step12 提交） |
 | 13 | 生成工作台页面 | ✅ | （step13 提交） |
 | 14 | 接入向导（薄页面版）+设置页 | ✅ | （step14 提交） |
-| **15** | **接入套件skill九件套** | **▶ 下一步（本设备最后一步）** | |
-| 16 | 滑动猪真实接入（适配层+rule-matrix+harness+三门） | 待做（需用户提供滑动猪仓库/Unity环境） | |
+| 15 | 接入套件skill九件套 | ✅ | （step15 提交） |
+| **16** | **滑动猪真实接入（适配层+rule-matrix+harness+三门）** | **待做（需滑动猪仓库/Unity环境——本设备没有）** | |
 | 17 | 故障注入实验与演示证据 | 待做 | |
 | 18 | 批量生产（P1） | 待做 | |
 | 19 | 自包含打包与发布 | 待做 | |
 
-验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过（含前端 vitest），然后单独 commit。当前基线：**216 测试全绿**（78 内核 + 31 玩具 + 64 平台 + 43 前端）。
+验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过（含前端 vitest），然后单独 commit。当前基线：**227 测试全绿**（78 内核 + 31 玩具 + 75 平台 + 43 前端）。
 
 ## 三、冻结的技术决策（不再讨论，直接执行）
 
@@ -101,7 +101,9 @@ web/                                前端（Vite+React+TS，npmmirror 镜像）
                  arrow·badge·tint props/明暗主题/实体点击回调) + vitest 24 测试
   src/api/client.ts  平台 API 薄封装（camelCase 类型与后端一致）
   src/App.tsx        骨架页：顶栏玩法切换 + 关卡预览纵向切片（求解→磁带→渲染→播放/单步/重置）
-skills/ harness-templates/          占位，第15步建设
+skills/onboarding-skill/            接入套件 skill 九件套（详设逐条蓝本：README 行为守则/资格四问/
+                                    七步工作流/契约正文/对拍规范/13条清单/产物清单/测试骨架/参考指向）
+harness-templates/                  对拍 harness 模板：unity-batchmode 骨架（REVIEW 标注点）+ 人工对拍清单
 ```
 
 ## 五、工作约定（新会话必须遵守）
@@ -119,14 +121,14 @@ skills/ harness-templates/          占位，第15步建设
 3. 仓库根执行 `bash build.sh`：188 测试全绿（含前端）即环境就绪。
 4. 前端开发：`cd web && npm run dev`（Vite 5173，代理 /api → localhost:5000）；平台 `dotnet run --project src/LevelForge.Platform --urls http://localhost:5000`。
 
-## 七、第 15 步设计要点（下一步开工即用，本设备收官步）
+## 七、第 16 步设计要点（回到有滑动猪仓库/Unity 环境的设备后开工即用）
 
-接入套件 skill 九件套（`skills/onboarding-skill/`）+ 对拍 harness 引擎模板（`harness-templates/`）（《接入套件skill详设》§1~§9 逐条蓝本）：
-- **九件套**（详设 §1 目录骨架）：README.md（加载方式/两阶段运行/agent 行为守则：问人不猜·REVIEW 标注·MANIFEST 义务/skill 版本号）、qualification.md（四问判定信号清单+证据义务+卫生度分级）、onboarding.md（七步工作流指令与验收标准）、contract.md（七成员语义合同+执行协议+铁律强制执行+可选能力+代码规范）、replay-spec.md（启动/执行/输出契约+假对拍判定+引擎模板与坑）、checklist.md（四大组 13 条——向导第④步同款）、deliverables.md（onboarding-output/ 目录与 MANIFEST 格式）、test-template/（通用用例骨架）、reference/（指向仓库内玩具推箱子实现）。
-- **书写原则**：给 agent 读的作业指导书——指令式、可判定、每条带产出物与验收标准；守则前置。
-- **harness-templates/**：Unity batchmode 模板骨架（`--level/--tape/--out` 参数、生产加载路径调用点、真实输入注入调用点、逐步 semanticState+胜负采集、result.json 输出）+ 人工对拍降级操作清单打印模板；均带 REVIEW 标注点。
-- **测试口径**：skill 是文档资产，验收=对照详设逐文件核对（内容完备性 checklist 跑一遍）；可加一个平台测试断言 skills/ 目录九件齐备（防止打包遗漏）。
-- 第 15 步完成后：本设备范围（0~15）收官，PROGRESS 更新为"待第16步（需滑动猪仓库/Unity 环境）"；16~19 步要点见各设计文档。
+滑动猪真实接入（《接入套件skill详设》§8 内部版参考实现 + 全流程走一遍向导）：
+- **材料**：滑动猪项目仓库（499 关存量）+ Unity Editor（batchmode 可用）+ 熟悉玩法的开发者半天。
+- **流程**：按 `skills/onboarding-skill/` 作业指导真实执行一遍——①向导登记（驱动=Unity batchmode，模板 `harness-templates/unity-batchmode/`）②资格评估四问 ③编码 agent 产出适配层（rule-matrix/格式说明书/校验器/机制表/视觉映射/玩法文档，499 关原生导入）④13 条清单人工审核 ⑤门2 真机对拍 20 关 ⑥门3 全量回归 + 转正上线。
+- **代码落点**：`src/Adapters/LevelForge.Adapters.SlidePig/`（空壳已建）+ GameRegistry 登记 SlidePigFacade。
+- **注意**：SlidePig 适配层兼任 skill 的"标准答案"参考实现；完成后回填 `skills/onboarding-skill/reference/README.md` 内部版一节。
+- 16 步之后：17 故障注入实验与演示证据（方案书 §10 演示路径：生成演示→故意失败与重生→接入向导走真项目→多玩法切换→before/after）→ 18 批量生产 P1 → 19 自包含打包发布（方案书 §8：解压即跑）。
 
 ## 八、已知坑与经验（原对话过程记录，避免新会话重踩）
 
