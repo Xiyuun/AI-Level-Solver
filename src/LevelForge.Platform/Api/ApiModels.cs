@@ -167,3 +167,21 @@ public sealed record VerificationRecordDto(
     string? LevelHash, string? AdapterHash, string? KernelVer, string? ContractVer,
     string? RuleMatrixHash, string? GameBuildFingerprint, string? HarnessHash,
     int? SemanticSchemaVer, string? SamplesJson, string? SummaryJson, string ExecutedAt);
+
+// ---- 接入向导 ----
+
+// 向导步进更新请求（detail 为存档文本：资格报告/清单快照等）
+public sealed record OnboardingStepRequestDto(string? Status, string? Detail = null);
+
+// 玩法状态变更请求（分级接入：试用档先行、转正档补验）
+public sealed record GameStatusRequestDto(string? Status, string? Note = null);
+
+// 门2驱动配置登记请求（接入产物⑦）
+public sealed record Gate2DriverRequestDto(
+    string? Command,
+    IReadOnlyList<string>? Args,
+    int? TimeoutSeconds = null,
+    bool? Applicable = null);
+
+// 向导任务项
+public sealed record OnboardingTaskDto(int Step, string Title, string Status, string? Detail, string UpdatedAt);

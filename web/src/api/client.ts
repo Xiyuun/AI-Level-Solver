@@ -248,8 +248,48 @@ export const listBaselines = (gameId: string) =>
 
 // 设置与短语
 export const getSettings = () => getJson<Record<string, unknown>>('/api/settings')
+export const saveSettings = (entries: Record<string, unknown>) =>
+  sendJson<Record<string, unknown>>('/api/settings', 'PUT', entries)
 export const listPhrases = (gameId: string) => getJson<Phrase[]>(`/api/games/${gameId}/phrases`)
 export const addPhrase = (gameId: string, text: string) =>
   sendJson<Phrase>(`/api/games/${gameId}/phrases`, 'POST', { text })
 export const removePhrase = (phraseId: number) =>
   sendJson<void>(`/api/phrases/${phraseId}`, 'DELETE')
+
+// ---- 接入向导 ----
+
+export interface OnboardingTask {
+  step: number
+  title: string
+  status: string // todo|doing|done|blocked
+  detail: string | null
+  updatedAt: string
+}
+
+export const getOnboarding = (gameId: string) =>
+  getJson<OnboardingTask[]>(`/api/games/${gameId}/onboarding`)
+export const updateOnboardingStep = (gameId: string, step: number, status: string, detail?: string) =>
+  sendJson<{ message: string }>(`/api/games/${gameId}/onboarding/${step}`, 'POST', { status, detail })
+export const setGameStatus = (gameId: string, status: string) =>
+  sendJson<{ status: string }>(`/api/games/${gameId}/status`, 'POST', { status })
+export const setGate2Driver = (gameId: string, command: string, args: string[], timeoutSeconds?: number) =>
+  sendJson<{ message: string; applicable: boolean }>(`/api/games/${gameId}/gate2-driver`, 'POST', {
+    command, args, timeoutSeconds,
+  })
+
+// LLM 测试连接（可带待验证配置，未保存先测）
+export const testLlmConnection = (body: { baseUrl?: string; apiKey?: string; model?: string }) =>
+  sendJson<{ ok: boolean; latencyMs: number; error: string | null; replyPreview: string | null }>(
+    '/api/settings/llm/test', 'POST', body)
+
+// 门1运行（向导③产物验收用）
+export const runGate1 = (gameId: string) =>
+  sendJson<{ recordId: number; passed: boolean; report: Record<string, { passed: boolean; issues: string[]; notes: string[] }> | null }>(
+    `/api/games/${gameId}/gates/1/run`, 'POST')
+
+// 门3运行（向导⑥上线前对照用）
+export const runGate3 = (gameId: string) =>
+  sendJson<{
+    recordId: number; total: number; matched: number; red: number; yellow: number; newLevels: number
+    rows: { levelId: string; verdict: string; status: string; notes: string[] }[]
+  }>(`/api/games/${gameId}/gates/3/run`, 'POST')

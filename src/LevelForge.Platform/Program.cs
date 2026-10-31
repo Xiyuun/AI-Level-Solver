@@ -32,6 +32,7 @@ builder.Services.AddSingleton<LevelFileStore>();
 builder.Services.AddSingleton<ConfirmationStore>();
 builder.Services.AddSingleton<BaselineStore>();
 builder.Services.AddSingleton<VerificationRecordStore>();
+builder.Services.AddSingleton<OnboardingStore>();
 builder.Services.AddSingleton<GateService>();
 builder.Services.AddSingleton<AdoptionService>();
 builder.Services.AddHttpClient<LlmClient>();            // LLM 客户端：OpenAI 兼容协议，实例自带 key
@@ -72,6 +73,7 @@ GenerationEndpoints.Map(app);
 AdoptionEndpoints.Map(app);
 GateEndpoints.Map(app);
 PlayEndpoints.Map(app);
+OnboardingEndpoints.Map(app);
 
 if (hasDist)
 {
