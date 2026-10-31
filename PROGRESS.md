@@ -22,9 +22,9 @@ LevelForge = "LLM 出题 + 确定性求解器验题"的关卡生产线 + 半天�
 | 7 | 难度特征提取与固定权重模型 | ✅ | 3c92d41 |
 | 8 | 平台服务骨架与SQLite数据模型 | ✅ | d469d04 |
 | 9 | 生成流水线（LLM出题→校验→判卷→重生） | ✅ | 4da396f |
-| 10 | 质检模式+安全落盘+执行确认 | ✅ | （step10 提交） |
-| **11** | **三道门编排（门1/门2对拍/门3基准diff+指纹失效）** | **▶ 下一步** | |
-| 12 | 前端骨架+SVG通用渲染器+顶栏玩法切换 | 待做 | |
+| 10 | 质检模式+安全落盘+执行确认 | ✅ | a7a605f |
+| 11 | 三道门编排（门1/门2对拍/门3基准diff+指纹失效） | ✅ | （step11 提交） |
+| **12** | **前端骨架+SVG通用渲染器+顶栏玩法切换** | **▶ 下一步** | |
 | 13 | 生成工作台页面 | 待做 | |
 | 14 | 接入向导（薄页面版）+设置页 | 待做 | |
 | 15 | 接入套件skill九件套 | 待做 | |
@@ -33,7 +33,7 @@ LevelForge = "LLM 出题 + 确定性求解器验题"的关卡生产线 + 半天�
 | 18 | 批量生产（P1） | 待做 | |
 | 19 | 自包含打包与发布 | 待做 | |
 
-验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过，然后单独 commit。当前基线：**155 测试全绿**（78 内核 + 31 玩具 + 46 平台）。
+验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过，然后单独 commit。当前基线：**164 测试全绿**（78 内核 + 31 玩具 + 55 平台）。
 
 ## 三、冻结的技术决策（不再讨论，直接执行）
 
@@ -79,14 +79,18 @@ src/LevelForge.Platform/            平台（ASP.NET Core minimal API + Microsof
               PromptBuilder（系统提示词=规则书+格式说明书；few-shot+参数+失败反馈；版本 v1）/
               FewShotSelector（按同难度档采样2~3个，进程内缓存）/ GenerationModels（失败分类+反馈文案：只给已验证事实）
   Adoption/   AdoptionService（落盘→幂等短路→模型验证→levels登记→旧确认失效→待确认登记；文件核对 ok/missing/hashChanged）
+  Gates/      GateService（三门编排：门1五项检查运行卡 / 门2子进程对拍 / 门3基准diff）/
+              Gate2Models（驱动配置占位符 {levelFile}{tapeFile}{outputFile}；HarnessReport 协议；
+              Gate2Comparator 逐步差分：首分歧步/第0步/关卡错位/步数不一致）
   Storage/    LevelFileStore（安全落盘六条流程：冻结产物/限定目录/冲突旧指纹复查/临时文件原子发布/最终核对/
               同编号写串行化）+ ILevelFileIO 接缝（故障注入测试用）+ TapeStore（+FindByRun）
   Database/   ConfirmationStore（五态状态机：pending/running/passed/failed/invalidated + 人工降级/报告导入）/
-              BaselineStore（版本维度唯一，幂等追加，不静默覆盖）
+              BaselineStore（版本维度唯一，幂等追加，不静默覆盖）/ VerificationRecordStore（三门结论+指纹字段）
   Api/        GameEndpoints（列表/详情/切换/关卡）/ SolveEndpoints（存量关+质检粘贴同一入口、磁带获取）/
               SettingsEndpoints（读写+LLM测试连接）/ PhraseEndpoints（短语 CRUD）/
               GenerationEndpoints（POST /api/generate 同步整轮 + 运行历史查询）/
-              AdoptionEndpoints（adopt/确认列表/人工结论/报告导入/入基准/基准列表）
+              AdoptionEndpoints（adopt/确认列表/人工结论/报告导入/入基准/基准列表）/
+              GateEndpoints（三门运行 + 验证记录查询）
 tests/LevelForge.Kernel.Tests/      内核自测（含 TestDoubles：SyntheticGraphAdapter 无状态图适配器，
                                     SyntheticFailure 枚举注入故障；PurityAdapter 带三种纯度缺陷+分类器）
 tests/LevelForge.Adapters.SokobanToy.Tests/
@@ -109,15 +113,17 @@ web/ skills/ harness-templates/     占位，第12/15步建设
 3. Git：仓库级 .git/config 已写身份（邓翔）；GitHub 凭据已由用户手动 push 一次完成缓存，后续可直接 `git push origin master`。
 4. 仓库根执行 `bash build.sh`：当前 145 测试全绿即环境就绪。
 
-## 七、第 11 步设计要点（下一步开工即用）
+## 七、第 12 步设计要点（下一步开工即用）
 
-三道门编排（《验证门》逐条依据；内核 AdapterHosting 已备五项检查，第10步已备基准/确认/磁带）：
-- **门1 运行卡**：POST /api/games/{id}/gates/1/run —— 组装 HostingCheckInput（依赖扫描/键判别样本/纯函数样本/确定性关卡均取自适配层注册内容），调 AdapterHosting.RunAll，全绿零豁免才 pass；结果落 verification_records（gate1，指纹字段 adapter_hash/kernel_ver/contract_ver + samples + summary）。玩具可全绿（纯逻辑适配层天然合规）。
-- **门2 对拍执行器**：驱动配置（命令模板+参数占位：{levelFile} {tapeFile} {outputFile}，产出物⑦）存 games 表（加列 gate2_driver_json）；流程=写输入包（磁带 JSON+关卡文件+资源条件）→ 拉起子进程（超时 kill 标 timeout）→ 读 result.json → 核对加载文件 levelHash → 逐步语义比对（初始不一致=第0步；首分歧步+字段）→ 胜负核对 → 结论落 verification_records（gate2，含 game_build_fingerprint/harness_hash/semantic_schema_ver/样本清单）。**玩具 gate2Applicable=false → 返回"不适用"不跑**。比对器（磁带 vs 报告）独立可测：用假报告驱动（一致→pass；中步分歧→报首分歧步）。
-- **门3 基准 diff**：POST /api/games/{id}/gates/3/run —— 全量求解该玩法 levels，与 baselines 按（levelId + 当前 adapter_hash + kernel_ver）对照，按《验证门》§5.2 语义分级：结论/解长一致=match；solved↔unsolvable 变化=**红灯**；同结论同解长但 trajectoryHash 变=黄灯（路径差异待核对）；statesExplored 大变=性能单列；无基准=新关待确认集合。**门3 新跑结果不自动入基准**（不能自动成为自己的预期）。结果落 verification_records（gate3，样本清单+diff summary）。
-- **指纹失效口径**：所有验证记录查询带指纹字段；基准 diff 先核对 adapter_hash+kernel_ver 再定位责任方（§9.3）。
-- API：GET /api/games/{id}/verification-records。
-- 测试：门1玩具全绿+落记录；门2比对器（一致/首分歧/第0步）；门2不适用路径；门3 全 match（先 adopt+approve 造基准）、红灯（插入差异基准）、新关待确认。
+前端骨架 + SVG 通用渲染器 + 顶栏玩法切换（《渲染器与视觉映射规范》为逐条依据，开工先细读）：
+- **先装 Node 24**：用户级（解压 zip 到 `%USERPROFILE%\node` + PATH 前缀，不动系统；与 SDK 同模式）。
+- **web/ 初始化**：Vite + React + TS（`npm create vite@latest` 模板 react-ts）；目录：`src/renderer/`（通用渲染器）、`src/api/`（平台 API client）、`src/pages/`；npm 依赖走 npmmirror 镜像（`.npmrc`）。
+- **通用渲染器**（核心承诺：新游戏零前端代码）：纯函数组件 `快照 SceneSnapshot × 视觉映射 VisualMapping → SVG`；映射纯数据声明（cellTypes/entityTypes/globalFields：shape/fill/icon/size/props 条件着色）；动画由磁带相邻快照补间；刻意不模仿游戏 UI（每项目一份前端=破坏零前端承诺）。玩具映射已在 SokobanToyContent.VisualMapping 可直接当测试样本。
+- **磁带消费**：GET /api/tapes/{id} → 初始帧+逐步快照；回放=按步切快照+补间（播放/单步/重置，第13步接控制条）。
+- **顶栏玩法切换**：GET /api/games（含 statusName/gate2Applicable 标识）→ 下拉；PUT activate 切换。
+- **前端测试进验收**：vitest（渲染器纯函数单测：给定快照+映射断言 SVG 结构/样式映射/未知类型降级）；`build.sh` 增加"存在 web/ 且有 node 时跑 npm ci+npm test"分支。
+- **托管**：Platform 增加 wwwroot 服务 `web/dist`（SPA fallback 到 index.html）；开发期 Vite proxy 到 localhost:5xxx→后端端口。
+- 试用态水印/工作台页面留第13步；本步只做骨架+渲染器+切换。
 
 ## 八、已知坑与经验（原对话过程记录，避免新会话重踩）
 
