@@ -26,14 +26,14 @@ LevelForge = "LLM 出题 + 确定性求解器验题"的关卡生产线 + 半天�
 | 11 | 三道门编排（门1/门2对拍/门3基准diff+指纹失效） | ✅ | d49677c |
 | 12 | 前端骨架+SVG通用渲染器+顶栏玩法切换 | ✅ | （step12 提交） |
 | 13 | 生成工作台页面 | ✅ | （step13 提交） |
-| **14** | **接入向导（薄页面版）+设置页** | **▶ 下一步** | |
-| 15 | 接入套件skill九件套 | 待做 | |
+| 14 | 接入向导（薄页面版）+设置页 | ✅ | （step14 提交） |
+| **15** | **接入套件skill九件套** | **▶ 下一步（本设备最后一步）** | |
 | 16 | 滑动猪真实接入（适配层+rule-matrix+harness+三门） | 待做（需用户提供滑动猪仓库/Unity环境） | |
 | 17 | 故障注入实验与演示证据 | 待做 | |
 | 18 | 批量生产（P1） | 待做 | |
 | 19 | 自包含打包与发布 | 待做 | |
 
-验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过（含前端 vitest），然后单独 commit。当前基线：**207 测试全绿**（78 内核 + 31 玩具 + 60 平台 + 38 前端）。
+验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过（含前端 vitest），然后单独 commit。当前基线：**216 测试全绿**（78 内核 + 31 玩具 + 64 平台 + 43 前端）。
 
 ## 三、冻结的技术决策（不再讨论，直接执行）
 
@@ -119,14 +119,14 @@ skills/ harness-templates/          占位，第15步建设
 3. 仓库根执行 `bash build.sh`：188 测试全绿（含前端）即环境就绪。
 4. 前端开发：`cd web && npm run dev`（Vite 5173，代理 /api → localhost:5000）；平台 `dotnet run --project src/LevelForge.Platform --urls http://localhost:5000`。
 
-## 七、第 14 步设计要点（下一步开工即用）
+## 七、第 15 步设计要点（下一步开工即用，本设备收官步）
 
-接入向导（薄页面版六步）+ 设置页（《接入向导》《表现层_接入》《表现层_设置》逐条依据）：
-- **薄页面六步**（冻结决策，不做三栏代码对照）：①登记表单（玩法名/关卡根目录/门2驱动配置 JSON）②资格评估报告解析（上传/粘贴四问报告文本，平台只存档与展示，不做自动判定）③产物验收+门1运行卡（展示接入五件产物；"运行门1"按钮调 gates/1/run 展示五项检查明细）④简化审核清单（REVIEW 置信标注清单——13 条 checklist 展示勾选，人工确认）⑤门2分诊卡（gate2Applicable=false 显示"不适用"；有驱动配置时展示运行入口与失败分诊四类指引）⑥门3diff（调 gates/3/run 展示 match/red/yellow/new 分级列表）+上线注册（onboarding_tasks 步进 + games.status 更新 API）。
-- **需要的后端增量**：onboarding_tasks API（GET 列表/POST 步进状态+detail）；games.status 变更 API（onboarding→trial→production，POST /api/games/{id}/status，带备注）；门2驱动配置写入 API（POST /api/games/{id}/gate2-driver，接向导②登记；替代测试里直改 SQL）。
-- **设置页**（表现层_设置）：LLM 三件套（地址/key明文回显/模型）+测试连接按钮（调 /api/settings/llm/test 显示延迟与回显）、生成默认值（候选上限/超时）、短语库管理（按玩法分组，复用工作台组件）、主题（亮/暗——settings ui.theme，BoardSvg 已支持）、玩法注册表最简管理（列表+状态，不做增删）。
-- **顶栏导航**：工作台/接入向导/设置三页签（App 壳加简单 tab 路由，无 router 库）。
-- 测试：后端 onboarding/status/gate2-driver 三个 API 各自平台测试；前端向导步进纯函数（步骤完成条件/状态推进）vitest。
+接入套件 skill 九件套（`skills/onboarding-skill/`）+ 对拍 harness 引擎模板（`harness-templates/`）（《接入套件skill详设》§1~§9 逐条蓝本）：
+- **九件套**（详设 §1 目录骨架）：README.md（加载方式/两阶段运行/agent 行为守则：问人不猜·REVIEW 标注·MANIFEST 义务/skill 版本号）、qualification.md（四问判定信号清单+证据义务+卫生度分级）、onboarding.md（七步工作流指令与验收标准）、contract.md（七成员语义合同+执行协议+铁律强制执行+可选能力+代码规范）、replay-spec.md（启动/执行/输出契约+假对拍判定+引擎模板与坑）、checklist.md（四大组 13 条——向导第④步同款）、deliverables.md（onboarding-output/ 目录与 MANIFEST 格式）、test-template/（通用用例骨架）、reference/（指向仓库内玩具推箱子实现）。
+- **书写原则**：给 agent 读的作业指导书——指令式、可判定、每条带产出物与验收标准；守则前置。
+- **harness-templates/**：Unity batchmode 模板骨架（`--level/--tape/--out` 参数、生产加载路径调用点、真实输入注入调用点、逐步 semanticState+胜负采集、result.json 输出）+ 人工对拍降级操作清单打印模板；均带 REVIEW 标注点。
+- **测试口径**：skill 是文档资产，验收=对照详设逐文件核对（内容完备性 checklist 跑一遍）；可加一个平台测试断言 skills/ 目录九件齐备（防止打包遗漏）。
+- 第 15 步完成后：本设备范围（0~15）收官，PROGRESS 更新为"待第16步（需滑动猪仓库/Unity 环境）"；16~19 步要点见各设计文档。
 
 ## 八、已知坑与经验（原对话过程记录，避免新会话重踩）
 
