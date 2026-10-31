@@ -116,6 +116,58 @@ public sealed class SokobanToyFacade : IGameFacade
         return new AdapterHosting().RunAll(input);
     }
 
+    // 试玩步进：从初态顺序执行结构化动作（与求解执行同一份适配层——架构承诺，渲染规范 §6）
+    // 无状态设计：每次请求带完整动作序列重放，服务端不存会话；非法动作/关卡抛 PlayException
+    public PlayState Play(string levelJson, IReadOnlyList<JsonNode> moves)
+    {
+        SokobanLevel? level;
+        try
+        {
+            level = JsonSerializer.Deserialize<SokobanLevel>(levelJson, TapeJson.Options);
+        }
+        catch (JsonException)
+        {
+            level = null;
+        }
+        if (level is null || level.Id is null || level.Grid is null)
+        {
+            throw new PlayException("关卡 JSON 非法：缺少合法的 id/grid 字段");
+        }
+        SokobanState state;
+        try
+        {
+            state = AdapterInstance.LoadLevel(level);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new PlayException($"关卡未通过静态校验：{ex.Message}");
+        }
+        var index = 0;
+        foreach (var node in moves)
+        {
+            SokobanMove move;
+            try
+            {
+                move = AdapterInstance.DecodeMove(node);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                throw new PlayException($"第 {index + 1} 步动作编码非法：{ex.Message}");
+            }
+            // 只接受当前局面的合法动作（契约：move 须来自本状态 GetLegalMoves）
+            if (!AdapterInstance.GetLegalMoves(state).Contains(move))
+            {
+                throw new PlayException($"第 {index + 1} 步动作不合法：{AdapterInstance.DescribeMove(state, move)}");
+            }
+            state = AdapterInstance.ApplyMove(state, move);
+            index++;
+        }
+        var legal = AdapterInstance.GetLegalMoves(state)
+            .Select(m => new PlayMove(AdapterInstance.EncodeMove(m), AdapterInstance.DescribeMove(state, m)))
+            .ToList();
+        return new PlayState(AdapterInstance.Snapshot(state), legal, AdapterInstance.IsGoal(state), index);
+    }
+
     #region 内部工具
 
     // JSON 层面即不可用：直接给 Invalid 结论（零 metrics），不进入求解器；难度不适用（band=0）

@@ -22,6 +22,8 @@ public interface IGameFacade
     PlatformSolve Solve(SolveCommand command);                   // 求解 + 制带 + 难度评估
 
     ComplianceReport RunGate1Checks();                           // 门1五项合规检查（样本组装属玩法知识，收在门面内）
+
+    PlayState Play(string levelJson, IReadOnlyList<JsonNode> moves);   // 试玩步进：从初态执行动作序列（渲染规范 §6）
 }
 
 // 求解命令：原生关卡 JSON 原文 + 原始字节（levelHash 来源）+ 运行资源条件
@@ -40,6 +42,15 @@ public sealed record PlatformSolve(
     SolutionTape? Tape,
     DifficultyAssessment Difficulty,
     string? RunConfigHash);
+
+// 试玩一步的可选项：结构化动作 + 展示文本（前端按钮/实体点击触发）
+public sealed record PlayMove(JsonNode Move, string MoveText);
+
+// 试玩局面：当前快照 + 合法动作 + 胜负判定（后端步进 API 的载荷；试玩与求解执行同一份适配层）
+public sealed record PlayState(SceneSnapshot Snapshot, IReadOnlyList<PlayMove> LegalMoves, bool IsGoal, int MovesExecuted);
+
+// 试玩执行失败（非法动作/非法关卡）：端点转 400
+public sealed class PlayException(string message) : Exception(message);
 
 // 运行资源条件指纹：任何预算/枚举模式被声明即对参数规范化哈希；全默认 = null（验证门 §2.1 runConfigHash）
 public static class RunConfig

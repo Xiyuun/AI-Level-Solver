@@ -1,4 +1,4 @@
-/* 第 12 步骨架样式：极简灰白，视觉细节第 13 步随工作台落 */
+/* 全局骨架 + 工作台样式（亮色为主，细节后置） */
 * { box-sizing: border-box; }
 body { margin: 0; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; color: #2c2f36; background: #fafbfc; }
 
@@ -12,23 +12,141 @@ body { margin: 0; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; color:
 .error { background: #fdecea; color: #b3261e; padding: 8px 20px; font-size: 14px; }
 .error-text { color: #b3261e; font-size: 13px; }
 
-.layout { display: flex; flex: 1; min-height: 0; }
-
-.levels { width: 220px; border-right: 1px solid #e4e7eb; padding: 12px; overflow-y: auto; }
-.levels h3 { margin: 4px 0 12px; font-size: 14px; color: #5a6069; }
-.levels ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.levels button { width: 100%; padding: 6px 10px; text-align: left; background: #fff; border: 1px solid #d8dce2; border-radius: 6px; cursor: pointer; }
-.levels button:hover { background: #eef3fb; }
-
-.preview { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; overflow: auto; }
 .empty { color: #8a919c; }
+.big-empty { display: flex; align-items: center; justify-content: center; flex: 1; font-size: 15px; padding: 40px; text-align: center; }
 
-.metrics { display: flex; gap: 14px; align-items: center; font-size: 14px; color: #444a54; }
-.status { padding: 2px 10px; border-radius: 10px; background: #e5e8ec; }
+/* ---- 工作台布局 ---- */
+.workbench { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.trial-watermark { background: #fff3d6; color: #7a5b00; padding: 8px 20px; font-size: 14px; border-bottom: 1px solid #f0dfae; }
+.wb-layout { display: flex; flex: 1; min-height: 0; }
+.wb-left { width: 360px; border-right: 1px solid #e4e7eb; padding: 14px; overflow-y: auto; }
+.wb-right { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px; overflow: auto; }
+
+.mode-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.mode-tabs button { flex: 1; padding: 7px; background: #fff; border: 1px solid #d8dce2; border-radius: 6px; cursor: pointer; }
+.mode-tabs button.active { background: #24344d; color: #fff; border-color: #24344d; }
+
+.wb-form { display: flex; flex-direction: column; gap: 12px; }
+.difficulty-group { display: flex; gap: 8px; }
+.difficulty-btn { flex: 1; padding: 12px 4px; background: #fff; border: 1px solid #d8dce2; border-radius: 8px; cursor: pointer; font-size: 14px; }
+.difficulty-btn.active { background: #3f6fb5; color: #fff; border-color: #3f6fb5; }
+
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #444a54; }
+.field input, .field textarea { padding: 6px 8px; border: 1px solid #d8dce2; border-radius: 6px; font-size: 13px; }
+.field textarea { min-height: 60px; resize: vertical; font-family: inherit; }
+.qc-input { font-family: Consolas, monospace; min-height: 120px; }
+
+.auto-adjusted { outline: 2px solid #e8a23d; }
+.mech-hint { color: #8a919c; font-size: 12px; margin-top: -6px; }
+
+.advanced summary { cursor: pointer; font-size: 13px; color: #5a6069; }
+.advanced .field { margin-top: 8px; }
+
+.form-actions { display: flex; gap: 8px; align-items: center; }
+.form-actions .primary, .result-actions .primary { background: #3f6fb5; color: #fff; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; }
+button { padding: 6px 12px; border: 1px solid #d8dce2; background: #fff; border-radius: 6px; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+.link { border: none; background: none; color: #3f6fb5; padding: 2px 4px; }
+
+.auto-retry-box { background: #f6f2ff; border: 1px solid #d9cdf5; border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.auto-retry-box ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* ---- 流水线日志（五色固定 §4） ---- */
+.pipeline-log { background: #fbfbfc; border: 1px solid #e4e7eb; border-radius: 8px; padding: 10px; font-size: 12.5px; max-height: 320px; overflow-y: auto; }
+.empty-log { color: #8a919c; }
+.log-line { display: flex; gap: 8px; padding: 2px 0; }
+.log-role { flex: none; width: 58px; text-align: center; border-radius: 4px; color: #fff; font-size: 11px; padding: 1px 0; }
+.log-llm .log-role { background: #3f6fb5; }
+.log-solver .log-role { background: #7e57c2; }
+.log-difficulty .log-role { background: #e8862f; }
+.log-constraint .log-role { background: #4caf7d; }
+.log-integration .log-role { background: #2aa5b8; }
+.log-text { color: #444a54; }
+
+/* ---- 指标条 / 候选条 ---- */
+.metrics-bar { display: flex; gap: 10px; }
+.metric-cell { background: #fff; border: 1px solid #e4e7eb; border-radius: 8px; padding: 8px 14px; min-width: 140px; }
+.metric-label { font-size: 12px; color: #8a919c; }
+.metric-value { font-size: 14px; margin-top: 2px; }
+
+.candidate-strip { display: flex; gap: 8px; flex-wrap: wrap; }
+.candidate-chip { display: flex; gap: 6px; align-items: center; padding: 5px 10px; border-radius: 14px; font-size: 12.5px; }
+.chip-index { color: #8a919c; }
+.chip-none { background: #d9efd9; border-color: #a8d8a8; }
+.chip-unsolvable { background: #fde3e1; border-color: #f2b8b3; }
+.chip-resource_limit { background: #fff0d3; border-color: #ecd39a; }
+.chip-difficulty_miss { background: #fdebd6; border-color: #ecc9a0; }
+.chip-format_invalid { background: #eceff3; border-color: #ccd2da; }
+.chip-api_error, .chip-solve_error { background: #f4d9ef; border-color: #ddb3d4; }
+.chip-selected { outline: 2px solid #3f6fb5; }
+.chip-adopted::after { content: '✓已采纳'; color: #1c6b2f; font-size: 11px; }
+.chip-difficulty { color: #8a6100; }
+
+/* ---- 预览区 ---- */
+.preview-pane { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.preview-toolbar { display: flex; align-items: center; gap: 14px; }
+.mode-switch { display: flex; border: 1px solid #d8dce2; border-radius: 6px; overflow: hidden; }
+.mode-switch button { border: none; border-radius: 0; }
+.mode-switch button.active { background: #3f6fb5; color: #fff; }
+.outcome-hint { font-size: 12.5px; color: #8a919c; }
+.controls { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #5a6069; }
+.controls input[type='range'] { width: 200px; }
+.play-moves { display: flex; gap: 8px; flex-wrap: wrap; }
+.goal-banner { background: #d9efd9; border: 1px solid #a8d8a8; color: #1c6b2f; padding: 8px 18px; border-radius: 8px; }
+
+.status { padding: 2px 10px; border-radius: 10px; background: #e5e8ec; font-size: 12.5px; }
 .status-solved { background: #d9efd9; color: #1c6b2f; }
 .status-unsolvableProven { background: #fde3e1; color: #a4271a; }
 .status-resourceLimit { background: #fff0d3; color: #8a6100; }
+.status-invalid { background: #eceff3; color: #5a6069; }
 
-.controls { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #5a6069; }
-.controls button { padding: 4px 10px; cursor: pointer; }
-.controls input[type='range'] { width: 220px; }
+.qc-summary { display: flex; gap: 12px; align-items: center; font-size: 13.5px; flex-wrap: wrap; }
+.result-actions { display: flex; gap: 10px; }
+
+/* ---- 失败态三段式（§5） ---- */
+.failure-report { width: 100%; max-width: 760px; background: #fff; border: 1px solid #f2b8b3; border-radius: 10px; padding: 16px; }
+.failure-report h3 { margin: 0 0 10px; color: #a4271a; }
+.failure-conclusion { font-weight: 600; margin: 10px 0 6px; }
+.failure-detail { font-size: 13px; color: #5a6069; margin-bottom: 10px; }
+.failure-advice { background: #fff8ec; border: 1px solid #ecd39a; border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+
+/* ---- 采纳弹窗 ---- */
+.dialog-backdrop { position: fixed; inset: 0; background: rgba(20, 24, 32, 0.45); display: flex; align-items: center; justify-content: center; z-index: 30; }
+.dialog { background: #fff; border-radius: 12px; padding: 20px 24px; width: 460px; max-width: 92vw; }
+.dialog h3 { margin: 0 0 12px; }
+.adopt-facts { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 13.5px; margin: 0; }
+.adopt-facts dt { color: #8a919c; }
+.adopt-facts dd { margin: 0; word-break: break-all; }
+.dialog-actions { display: flex; gap: 10px; margin-top: 16px; }
+.conflict-box { background: #fdecea; border: 1px solid #f2b8b3; border-radius: 8px; padding: 10px 12px; margin-top: 12px; font-size: 13px; }
+.hash-line { font-family: Consolas, monospace; font-size: 11.5px; color: #5a6069; word-break: break-all; }
+.dialog-note { margin-top: 12px; font-size: 12px; color: #8a919c; }
+
+/* ---- 执行确认卡 ---- */
+.confirmation-card { width: 100%; max-width: 760px; background: #fff; border: 1px solid #e4e7eb; border-radius: 10px; padding: 14px 16px; }
+.confirmation-card h4 { margin: 0 0 10px; font-size: 14px; }
+.confirmation-row { display: flex; gap: 10px; align-items: center; font-size: 13px; padding: 6px 0; border-bottom: 1px dashed #eceff3; flex-wrap: wrap; }
+.state-chip { padding: 1px 10px; border-radius: 10px; font-size: 12px; }
+.state-pending { background: #eceff3; color: #5a6069; }
+.state-running { background: #dbeafe; color: #1d4ed8; }
+.state-passed { background: #d9efd9; color: #1c6b2f; }
+.state-failed { background: #fde3e1; color: #a4271a; }
+.state-invalidated { background: #eceff3; color: #9aa0a8; text-decoration: line-through; }
+.file-status { font-size: 12px; }
+.fs-ok { color: #1c6b2f; }
+.fs-missing, .fs-hashChanged { color: #a4271a; }
+.row-actions { display: flex; gap: 6px; }
+.note { color: #8a919c; font-size: 12px; }
+.confirm-inputs { display: flex; gap: 8px; margin-top: 10px; }
+.confirm-inputs input { flex: 1; padding: 5px 8px; border: 1px solid #d8dce2; border-radius: 6px; }
+
+/* ---- 短语库 ---- */
+.phrase-picker { align-self: flex-end; }
+.phrase-panel { position: relative; z-index: 10; background: #fff; border: 1px solid #d8dce2; border-radius: 8px; padding: 10px; margin-top: 4px; box-shadow: 0 4px 14px rgba(0,0,0,0.08); }
+.phrase-panel ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.phrase-panel li { display: flex; gap: 6px; align-items: center; }
+.phrase-panel li > button:first-child { flex: 1; text-align: left; }
+.phrase-delete { color: #a4271a; border-color: #f2b8b3; }
+.phrase-add { display: flex; gap: 6px; margin-top: 8px; }
+.phrase-add input { flex: 1; padding: 5px 8px; border: 1px solid #d8dce2; border-radius: 6px; font-size: 12.5px; }
+.phrase-empty { font-size: 12px; color: #8a919c; }

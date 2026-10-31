@@ -71,6 +71,7 @@ PhraseEndpoints.Map(app);
 GenerationEndpoints.Map(app);
 AdoptionEndpoints.Map(app);
 GateEndpoints.Map(app);
+PlayEndpoints.Map(app);
 
 if (hasDist)
 {
