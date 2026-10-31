@@ -239,9 +239,11 @@ public sealed class AppDatabase
           confirmed_by TEXT,
           confirmed_at TEXT,
           note TEXT,
+          solve_run_id INTEGER REFERENCES solve_runs(id),
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS ix_confirm_level ON execution_confirmations(game_id, level_id);
         """,
         // 设置：键值表，值 JSON 存储（LLM 地址/key 明文本地、生成默认值、界面状态）
         """

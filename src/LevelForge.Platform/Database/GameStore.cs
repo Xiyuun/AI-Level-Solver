@@ -86,6 +86,26 @@ public sealed class GameStore
             reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6));
     }
 
+    // 关卡登记 upsert：安全落盘成功后调用（同编号覆盖内容与哈希；来源随调用方）
+    public void UpsertLevel(string gameId, string levelId, string levelHash, string contentJson, string source)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO levels (game_id, level_id, level_hash, content_json, source, created_at)
+            VALUES ($g, $l, $h, $c, $s, $now)
+            ON CONFLICT(game_id, level_id) DO UPDATE SET
+              level_hash = excluded.level_hash, content_json = excluded.content_json, source = excluded.source
+            """;
+        cmd.Parameters.AddWithValue("$g", gameId);
+        cmd.Parameters.AddWithValue("$l", levelId);
+        cmd.Parameters.AddWithValue("$h", levelHash);
+        cmd.Parameters.AddWithValue("$c", contentJson);
+        cmd.Parameters.AddWithValue("$s", source);
+        cmd.Parameters.AddWithValue("$now", AppDatabase.UtcNowIso);
+        cmd.ExecuteNonQuery();
+    }
+
     #region 内部工具
 
     // 组装玩法行（列序与 SELECT g.* 一致）

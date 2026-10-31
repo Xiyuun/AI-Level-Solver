@@ -74,4 +74,21 @@ public sealed class TapeStore
         var fullPath = Path.Combine(_db.DataDir, relative);
         return File.Exists(fullPath) ? File.ReadAllText(fullPath) : null;
     }
+
+    // 按运行找磁带索引（入基准时取 trajectoryHash 用）；无磁带返回 null（无解关没有磁带）
+    public TapeRow? FindByRun(long runId)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, run_id, file_path, trajectory_hash, artifact_hash, created_at
+            FROM tapes WHERE run_id = $r ORDER BY id DESC LIMIT 1
+            """;
+        cmd.Parameters.AddWithValue("$r", runId);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read()
+            ? new TapeRow(reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2),
+                reader.GetString(3), reader.GetString(4), reader.GetString(5))
+            : null;
+    }
 }

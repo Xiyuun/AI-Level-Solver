@@ -9,9 +9,9 @@ public sealed record GenerationRunRow(
     string Status, string? FailureSummary, long? AdoptedCandidateId,
     string StartedAt, string? FinishedAt);
 
-// 生成候选行：generation_candidates 表整行
+// 生成候选行：generation_candidates 表整行（ContentJson 可空：api_error/无 JSON 候选没有内容）
 public sealed record GenerationCandidateRow(
-    long Id, long RunId, int AttemptIndex, string ContentJson,
+    long Id, long RunId, int AttemptIndex, string? ContentJson,
     string FailureClass, string? FailureDetail, int? DifficultyBand, double? DifficultyScore,
     long? SolveRunId, long ElapsedMs, string CreatedAt);
 

@@ -93,3 +93,45 @@ public sealed record GenerationRunDto(
     int CandidateLimit, long SolveTimeoutMs, string PromptVersion,
     IReadOnlyList<CandidateAttemptDto> Candidates,
     int? AdoptedAttempt, string? FailureSummary, long TotalElapsedMs);
+
+// ---- 采纳与执行确认 ----
+
+// 采纳落盘请求：source = generated（生成候选）| imported（质检/手摆导入）
+public sealed record AdoptRequestDto(
+    string? GameId,
+    string? LevelJson,
+    string? Source = null,
+    bool Overwrite = false,
+    string? ExpectedOldHash = null);
+
+// 采纳结论：落盘与登记的完整引用
+public sealed record AdoptResponseDto(
+    string LevelId, string LevelHash, string FilePath, bool SameContent, bool Replaced,
+    long ConfirmationId, string ConfirmationState, long? SolveRunId);
+
+// 执行确认项（fileStatus：ok 一致 / missing 文件缺失 / hashChanged 内容已变）
+public sealed record ConfirmationDto(
+    long Id, string GameId, string LevelId, string LevelHash, string State, string Mode,
+    string? Outcome, string? ConfirmedBy, string? ConfirmedAt, string? Note, long? SolveRunId,
+    string FileStatus, string? CurrentFileHash, string CreatedAt, string UpdatedAt);
+
+// 人工降级结论请求（验证门 §4.4：注明"仅最终结果"）
+public sealed record ManualResultRequestDto(
+    string? Outcome, string? ConfirmedBy, string? Note = null, string? GameBuildFingerprint = null);
+
+// 执行报告导入请求（harness 报告的最小集：指纹 + 结局）
+public sealed record ExecutionReportDto(string? LevelHash, string? Outcome, string? GameBuildFingerprint = null);
+
+// 确认入基准请求
+public sealed record ApproveRequestDto(string? ApprovedBy);
+
+// 入基准结论（AlreadyExists=true 表示重复确认幂等返回）
+public sealed record ApproveResponseDto(long BaselineId, bool AlreadyExists);
+
+// 基准项（验证门 §5.1 LevelBaseline）
+public sealed record BaselineDto(
+    long Id, string GameId, string LevelId, string LevelHash,
+    string AdapterVer, string AdapterHash, string KernelVer,
+    string Status, string Optimality, bool GraphComplete, string TerminationReason,
+    int SolutionLength, long StatesExplored, string TrajectoryHash,
+    string? ExecutionConfirmationRef, string? ApprovedBy, string? ApprovedAt, string CreatedAt);
