@@ -136,6 +136,7 @@ harness-templates/                  对拍 harness 模板：unity-batchmode 骨�
 2. **本机 Git 是 2.21（2019 年）**：不支持 `git init -b`；credential manager 老，GitHub 推送用 PAT（本设备已由用户手动 push 完成凭据缓存）。
 3. **上级目录有个误建的空 .git**（旧布局）：内层仓库优先，不要动它。
 4. **ZCode 的 bash 偶发把命令和 shell 钩子串线报 exit 127**：原样重跑一遍命令即可，不是仓库问题。**新设备变体（必躲）**：命令行里含中文字符（路径/名字/grep 中文模式）时 exit 127 **必现且重跑无效**——用通配符路径、Read/Edit 文件方式绕开，绝不在 bash 命令里直接写中文。
+4b. **.cmd/.bat 批处理文件必须纯 ASCII + CRLF**（run.cmd 踩过）：cmd.exe 按 ANSI(GBK) 解析批处理，编辑工具写出的 UTF-8 中文会被当乱码命令逐行执行；且 Write 工具默认 LF 行尾，批处理要求 CRLF——中文 + LF 叠加会让 `echo`/`rem` 行被当成命令跑。修法：英文注释/提示 + 转换 CRLF（PowerShell 脚本 ReadAllText/WriteAllText ASCII）。
 5. **改文件用编辑工具整体重写，别用 sed 改代码文件**（曾把测试文件改坏过一次）。PROGRESS.md 若 Edit 匹配失败（CRLF 差异），直接 Write 整体重写。
 6. **SDK 10 的 JsonNode 没有 DeepCopy 扩展**：用 CanonicalJson.Canonicalize 代替（它本来就产出独立副本）。
 7. **曾由测试抓出的 bug**（保持这种"测试先红"的敏感度）：校验器在非矩形网格上越界（已加 ragged 守卫）；toy-005 关卡数据笔误目标数少 1；generation_candidates.content_json 误设 NOT NULL（api_error/无JSON 候选没有内容——第9步抓出）。
