@@ -57,6 +57,38 @@ public static class GameEndpoints
                 .Select(l => new LevelDto(l.LevelId, l.LevelHash, l.Source, l.CreatedAt)).ToList();
             return Results.Ok(list);
         });
+
+        // 原生关卡导入（接入向导③：从游戏项目关卡目录批量入库；幂等，子集外如实跳过并计数）
+        app.MapPost("/api/games/{gameId}/import-levels", async (
+            string gameId, Storage.LevelImporter importer, GameStore games, HttpContext http) =>
+        {
+            if (games.FindGame(gameId) is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            ImportRequestDto? body;
+            try
+            {
+                body = await http.Request.ReadFromJsonAsync<ImportRequestDto>();
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                body = null;
+            }
+            if (body is null || string.IsNullOrWhiteSpace(body.Directory))
+            {
+                return Results.BadRequest(new { message = "缺少 directory 字段（游戏项目关卡目录绝对路径）" });
+            }
+            try
+            {
+                var result = importer.ImportDirectory(gameId, body.Directory);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
     }
 
     #region 内部工具

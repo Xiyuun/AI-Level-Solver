@@ -1,0 +1,105 @@
+{
+    "levelId": 1,
+    "levelName": "nlevel 1",
+    "mapWidth": 12,
+    "mapHeight": 19,
+    "pigCount": 6,
+    "pigs": [
+        {
+            "id": 0,
+            "facing": "Down",
+            "pigType": "Normal",
+            "specialInfo": "",
+            "occupiedCells": [
+                {
+                    "x": 2,
+                    "y": 16
+                },
+                {
+                    "x": 2,
+                    "y": 15
+                }
+            ]
+        },
+        {
+            "id": 1,
+            "facing": "Left",
+            "pigType": "Normal",
+            "specialInfo": "",
+            "occupiedCells": [
+                {
+                    "x": 1,
+                    "y": 17
+                },
+                {
+                    "x": 2,
+                    "y": 17
+                }
+            ]
+        },
+        {
+            "id": 2,
+            "facing": "Left",
+            "pigType": "Normal",
+            "specialInfo": "",
+            "occupiedCells": [
+                {
+                    "x": 1,
+                    "y": 14
+                },
+                {
+                    "x": 2,
+                    "y": 14
+                }
+            ]
+        },
+        {
+            "id": 3,
+            "facing": "Down",
+            "pigType": "Normal",
+            "specialInfo": "",
+            "occupiedCells": [
+                {
+                    "x": 1,
+                    "y": 16
+                },
+                {
+                    "x": 1,
+                    "y": 15
+                }
+            ]
+        },
+        {
+            "id": 4,
+            "facing": "Down",
+            "pigType": "Normal",
+            "specialInfo": "",
+            "occupiedCells": [
+                {
+                    "x": 3,
+                    "y": 15
+                },
+                {
+                    "x": 3,
+                    "y": 14
+                }
+            ]
+        },
+        {
+            "id": 5,
+            "facing": "Down",
+            "pigType": "Normal",
+            "specialInfo": "",
+            "occupiedCells": [
+                {
+                    "x": 3,
+                    "y": 17
+                },
+                {
+                    "x": 3,
+                    "y": 16
+                }
+            ]
+        }
+    ]
+}

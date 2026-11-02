@@ -35,6 +35,7 @@ builder.Services.AddSingleton<VerificationRecordStore>();
 builder.Services.AddSingleton<OnboardingStore>();
 builder.Services.AddSingleton<GateService>();
 builder.Services.AddSingleton<AdoptionService>();
+builder.Services.AddSingleton<LevelImporter>();       // 原生关卡导入（接入向导③：游戏项目目录 → 平台库）
 builder.Services.AddHttpClient<LlmClient>();            // LLM 客户端：OpenAI 兼容协议，实例自带 key
 
 #endregion

@@ -35,7 +35,8 @@ public sealed class DatabaseAndSeedTests : IDisposable
         GameSeeder.Seed(db, GameRegistry.Instance);
 
         var games = new GameStore(db).ListGames();
-        var toy = Assert.Single(games);
+        // 注册表含多个玩法（sokoban-toy + slide-pig）：按 id 取断言目标
+        var toy = games.Single(g => g.Id == "sokoban-toy");
         Assert.Equal("sokoban-toy", toy.Id);
         Assert.Equal(GameStatus.Production, toy.Status);       // 内置参考玩法：生产中
         Assert.False(toy.Gate2Applicable);                     // 无游戏本体：门2不适用（≠未通过）
@@ -64,8 +65,8 @@ public sealed class DatabaseAndSeedTests : IDisposable
         GameSeeder.Seed(db, GameRegistry.Instance);
         GameSeeder.Seed(db, GameRegistry.Instance);   // 重跑种子：不产生重复行
         var games = new GameStore(db).ListGames();
-        Assert.Single(games);
-        Assert.Equal(10, games[0].LevelCount);
+        Assert.Equal(GameRegistry.Instance.Facades.Count, games.Count);   // 幂等：数量与注册表一致
+        Assert.Equal(10, games.Single(g => g.Id == "sokoban-toy").LevelCount);
     }
 
     [Fact]

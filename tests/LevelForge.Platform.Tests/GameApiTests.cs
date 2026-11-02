@@ -23,7 +23,7 @@ public sealed class GameApiTests
         // JSON 口径：camelCase 字段（前端契约）
         Assert.Contains("\"gameId\":\"sokoban-toy\"", raw);
         var list = JsonSerializer.Deserialize<List<Api.GameSummaryDto>>(raw, TestJson.Options);
-        var toy = Assert.Single(list!);
+        var toy = list!.Single(g => g.GameId == "sokoban-toy");   // 多玩法注册下按 id 取断言目标
         Assert.Equal("玩具推箱子（内置参考）", toy.DisplayName);
         Assert.Equal("production", toy.Status);
         Assert.Equal("生产中", toy.StatusName);

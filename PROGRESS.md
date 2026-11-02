@@ -28,12 +28,12 @@ LevelForge = "LLM 出题 + 确定性求解器验题"的关卡生产线 + 半天�
 | 13 | 生成工作台页面 | ✅ | （step13 提交） |
 | 14 | 接入向导（薄页面版）+设置页 | ✅ | （step14 提交） |
 | 15 | 接入套件skill九件套 | ✅ | （step15 提交） |
-| **16** | **滑动猪真实接入（适配层+rule-matrix+harness+三门）** | **待做（需滑动猪仓库/Unity环境——本设备没有）** | |
+| **16** | **滑动猪接入 · 前半完成**：适配层（8 类型规则引擎+校验器+五件产物）、A*/贪心DFS 两策略、门面注册（试用态）、关卡导入器+API——264 测试全绿。**剩余**：harness 写入猪项目、门2 真机对拍 20 关、门3 基准、转正上线（详见 §7） | **进行中** | |
 | 17 | 故障注入实验与演示证据 | 待做 | |
 | 18 | 批量生产（P1） | 待做 | |
 | 19 | 自包含打包与发布 | 待做 | |
 
-验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过（含前端 vitest），然后单独 commit。当前基线：**227 测试全绿**（78 内核 + 31 玩具 + 75 平台 + 43 前端）。
+验收口径：每步完成后 `bash build.sh`（或 `build.cmd`）构建+全部测试通过（含前端 vitest），然后单独 commit。当前基线：**264 测试全绿**（89 内核 + 31 玩具 + 79 平台 + 22 滑动猪 + 43 前端）。
 
 ## 三、冻结的技术决策（不再讨论，直接执行）
 
@@ -121,14 +121,34 @@ harness-templates/                  对拍 harness 模板：unity-batchmode 骨�
 3. 仓库根执行 `bash build.sh`：227 测试全绿（78 内核 + 31 玩具 + 75 平台 + 43 前端）即环境就绪。
 4. 前端开发：`cd web && npm run dev`（Vite 5173，代理 /api → localhost:5000）；平台 `dotnet run --project src/LevelForge.Platform --urls http://localhost:5000`。
 
-## 七、第 16 步设计要点（回到有滑动猪仓库/Unity 环境的设备后开工即用）
+## 七、第 16 步当前状态（2026-11-02，公司机推进）
 
-滑动猪真实接入（《接入套件skill详设》§8 内部版参考实现 + 全流程走一遍向导）：
-- **材料**：滑动猪项目仓库（499 关存量）+ Unity Editor（batchmode 可用）+ 熟悉玩法的开发者半天。
-- **流程**：按 `skills/onboarding-skill/` 作业指导真实执行一遍——①向导登记（驱动=Unity batchmode，模板 `harness-templates/unity-batchmode/`）②资格评估四问 ③编码 agent 产出适配层（rule-matrix/格式说明书/校验器/机制表/视觉映射/玩法文档，499 关原生导入）④13 条清单人工审核 ⑤门2 真机对拍 20 关 ⑥门3 全量回归 + 转正上线。
-- **代码落点**：`src/Adapters/LevelForge.Adapters.SlidePig/`（空壳已建）+ GameRegistry 登记 SlidePigFacade。
-- **注意**：SlidePig 适配层兼任 skill 的"标准答案"参考实现；完成后回填 `skills/onboarding-skill/reference/README.md` 内部版一节。
-- 16 步之后：17 故障注入实验与演示证据（方案书 §10 演示路径：生成演示→故意失败与重生→接入向导走真项目→多玩法切换→before/after）→ 18 批量生产 P1 → 19 自包含打包发布（方案书 §8：解压即跑）。
+**已完成（264 测试全绿）**：
+- 资格评估落定：游戏仓库 `E:\Projects\UnityProjects\PiggyFarm\piggyfarm`（Unity 2022.3.62f3c1，路径见此勿写死进代码）；
+  关卡源 = `Assets/Main/FrameWorkExtras/LevelData/Luban~/Datas/Levels/*.json`（110 个，**非 499**——499 为规划数）。
+- **v1 规则子集**：Normal/Boom/Spring/Long/Lock/SmallElephant/Cage/CageL（75 关）；Duck(26)/Rope/Scissors(9) 留 v2；
+  无地形/兔子/农场主（现有关卡数据未使用）。规则矩阵带源码证据在 `SlidePigArtifacts.RuleMatrix`（**待用户④审核确认**）。
+- 适配层全套：`SlidePigModels/Rules/Adapter/Validator/Artifacts` + 22 个测试（规则语义逐条 + 真实夹具关 1/13/31/61/71/91 + 门1全绿）。
+- **关键实测发现（普查数据）**：110 关里除 1 号关（6 猪）外全部 **61~122 实体**的超稠密关；
+  精确搜索（BFS/A*）30s 内全部未知（74 关）；61 号关贪心 DFS 10 分钟 2460 万展开/360 万去重仍未穷尽——稠密关=诚实报"未知"。
+  → 新增两个内核策略（这是《求解内核》§10"优化路径按需触发"的落地）：**AStarSolver**（可采纳启发式 h=剩余非笼实体数，
+  稀疏关最优解）与 **GreedyDfsSolver**（迭代式 DFS+启发式排序+置换表，任一解 Optimality=NotProven，穷尽才 UnsolvableProven）。
+  门面按实体数选策略（≥40 贪心）；两策略各有内核测试组。
+- 平台侧：SlidePigFacade 注册（试用态，门2适用=true）、LevelImporter + `POST /api/games/slide-pig/import-levels`。
+- probe/ 三个诊断工具（单关探针/微基准/普查），保留在仓库可复用。
+
+**待用户回答的关键问题（影响稠密关结论的解读）**：
+- 这批超稠密关（60~120 实体）设计上是否保证**不使用道具**可通关？（游戏存在死局→复活/道具流程；
+  若道具是设计内的通关要素，"无道具模型不可解"就是正确结论而非求解器缺陷——规则矩阵需补充该资源条件声明。）
+
+**第 16 步剩余工作（下一步开工清单）**：
+1. harness 写入猪项目 `Assets/Editor/LevelForgeHarness/`（模板 `harness-templates/unity-batchmode/`）：
+   batchmode 加载 1 号关→按磁带 click 注入（走真实点击路径）→逐步语义状态对照 `SlidePigAdapter.ProjectSemanticState` 的 schema。
+   需读：GameManager.InitializeAsync 入关路径、点击入口（NormalPig.OnPointerClick→StartWalkingFromClick）、BoardSettled 落定信号。
+2. 向导走流程：import-levels 导入 110 关（75 入库）→ 门2 对拍（先 1 号关跑通，再抽 20）→ 门3 基准（稀疏关求解建基准，稠密关记录"未知"观察值）。
+3. 用户④人工审核 13 条清单（rule-matrix 确认人一列待签）→ 转正（status trial→production）。
+4. 回填 `skills/onboarding-skill/reference/` 内部版一节（SlidePig 兼任标准答案）。
+- 16 步之后：17 故障注入实验与演示证据（方案书 §10）→ 18 批量生产 P1 → 19 自包含打包发布（方案书 §8：解压即跑）。
 
 ## 八、已知坑与经验（原对话过程记录，避免新会话重踩）
 
@@ -143,7 +163,9 @@ harness-templates/                  对拍 harness 模板：unity-batchmode 骨�
 8. **用户协作偏好**：授权全权实现、逐步推进，不需事事确认；设计文档一律不改；时间由用户灵活安排（额度可能随时中断——所以每步必须停在可提交边界）。
 9. **PROGRESS.md 维护规则**：每完成一步 commit 时，同步更新第二节进度表与第七节"下一步要点"，然后 push。
 10. **用户级旧 SDK 遮蔽系统 SDK**（公司机踩过）：`~/.dotnet` 若装有旧版 SDK（如 8.0.403），build/run 脚本无条件把它提到 PATH 最前会导致 MSB4068（8.0 不识别 .slnx/net10.0）。四个脚本已改为**仅当用户级 dotnet 存在 10.x SDK 时才优先**，否则回落系统 dotnet——两台设备（家：用户级 10.0.403；公司：系统 10.0.201 + 用户级 8.0.403）均验证通过。
+11. **C# 多行原始字符串**：起始 `"""` 后必须**直接换行**，内容另起一行（`"""{...` 同行跟内容=语法错 CS1513 连锁报一大片）；单行内容才能同行闭合。踩过两次。
+12. **游戏项目侧事实**（PiggyFarm）：关卡 JSON 是 Luban 配置（`Luban~/Datas/Levels/`，110 个）；铁笼可与猪**叠放**（笼内猪被锁）；游戏死局会走复活/道具流程（无道具可解性未验证——见 §7 待用户回答项）。
 
 ## 九、新会话开场白（复制即用）
 
-> 读仓库根 PROGRESS.md（重点二、三、五、七、八节），再读设计文档目录中的《方案书.md》。遵守第五节工作约定，从第 16 步继续，每步测试全绿后 commit 并更新 PROGRESS.md，然后 push。
+> 读仓库根 PROGRESS.md（重点二、三、五、七、八节），再读设计文档目录中的《方案书.md》。遵守第五节工作约定，继续第 16 步剩余工作（见第七节"剩余工作清单"，从 harness 开始），每步测试全绿后 commit 并更新 PROGRESS.md，然后 push。

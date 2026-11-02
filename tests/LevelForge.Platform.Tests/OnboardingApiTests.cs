@@ -71,7 +71,7 @@ public sealed class OnboardingApiTests
         Assert.Equal(HttpStatusCode.OK, trial.Status);
         var games = JsonSerializer.Deserialize<List<Api.GameSummaryDto>>(
             await client.GetStringAsync("/api/games"), TestJson.Options)!;
-        Assert.Equal("trial", Assert.Single(games).Status);
+        Assert.Equal("trial", games.Single(g => g.GameId == "sokoban-toy").Status);
 
         // 转正（门2/门3 补验后）
         var production = await PostAsync(client, "/api/games/sokoban-toy/status", new { status = "production" });

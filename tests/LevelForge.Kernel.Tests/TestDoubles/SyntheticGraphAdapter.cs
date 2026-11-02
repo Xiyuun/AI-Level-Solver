@@ -27,9 +27,11 @@ public enum SyntheticFailure
 }
 
 // 有向图适配器：邻接顺序 = 边声明顺序（保序），保证搜索确定性
+// 同时声明 IHeuristicAdapter（恒 0 启发式 = 退化为 Dijkstra）——A* 内核测试用
 public sealed class SyntheticGraphAdapter :
     IGameAdapter<SyntheticLevel, SyntheticState, SyntheticMove>,
-    IExecutionProtocol<SyntheticState, SyntheticMove>
+    IExecutionProtocol<SyntheticState, SyntheticMove>,
+    IHeuristicAdapter<SyntheticState>
 {
     private readonly ConditionalWeakTable<SyntheticLevel, Dictionary<int, List<int>>> _adjCache
         = new();                                                 // 按关卡实例缓存的邻接表（引用键，线程安全）
@@ -155,6 +157,16 @@ public sealed class SyntheticGraphAdapter :
     public JsonNode ProjectSemanticState(SyntheticState state)
     {
         return new JsonObject { ["node"] = state.Node };
+    }
+
+    #endregion
+
+    #region IHeuristicAdapter
+
+    // 恒 0 启发式（可采纳）：A* 退化为按 g 的 Dijkstra，用于与 BFS 做语义等价对拍
+    public int EstimateToGoal(SyntheticState state)
+    {
+        return 0;
     }
 
     #endregion

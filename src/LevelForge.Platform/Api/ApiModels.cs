@@ -185,3 +185,6 @@ public sealed record Gate2DriverRequestDto(
 
 // 向导任务项
 public sealed record OnboardingTaskDto(int Step, string Title, string Status, string? Detail, string UpdatedAt);
+
+// 关卡导入请求：游戏项目关卡目录（绝对路径）
+public sealed record ImportRequestDto(string Directory);

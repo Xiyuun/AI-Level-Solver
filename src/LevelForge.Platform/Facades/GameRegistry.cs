@@ -9,8 +9,8 @@ public sealed class GameRegistry
 
     private readonly Dictionary<string, IGameFacade> _games = new()
     {
-        ["sokoban-toy"] = new SokobanToyFacade()
-        // 第16步：["slide-pig"] = new SlidePigFacade(...)
+        ["sokoban-toy"] = new SokobanToyFacade(),
+        ["slide-pig"] = new SlidePigFacade()   // 第16步接入：试用态（门2/门3 未跑，结论带水印）
     };
 
     public IReadOnlyCollection<IGameFacade> Facades => _games.Values;
