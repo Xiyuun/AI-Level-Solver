@@ -2,8 +2,12 @@
 rem LevelForge one-click start (Windows CMD: double-click or run from terminal)
 rem Adds user-level toolchain PATH; builds web assets on first run; serves http://localhost:5000
 cd /d %~dp0
-set PATH=%USERPROFILE%\.dotnet;%USERPROFILE%\nodejs;%PATH%
-set DOTNET_ROOT=%USERPROFILE%\.dotnet
+rem Prefer user-level dotnet ONLY when it has a 10.x SDK (an old user-level 8.x must not shadow system SDK)
+set PATH=%USERPROFILE%\nodejs;%PATH%
+if exist "%USERPROFILE%\.dotnet\sdk\10.*" (
+  set PATH=%USERPROFILE%\.dotnet;%PATH%
+  set DOTNET_ROOT=%USERPROFILE%\.dotnet
+)
 
 if not exist web\dist (
   where node >nul 2>nul

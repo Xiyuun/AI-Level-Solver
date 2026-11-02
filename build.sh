@@ -3,9 +3,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# 用户级工具链（新设备装在 ~/.dotnet 与 ~/nodejs，不动系统安装）
-export PATH="$HOME/.dotnet:$HOME/nodejs:$PATH"
-export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
+# 用户级工具链：仅当用户级 dotnet 带 10.x SDK 时才优先（存在 ~/.dotnet 装旧版如 8.x 遮蔽系统 SDK 的机器）
+# nodejs 目录不存在时 PATH 前置是无害空操作；无用户级 10.x 时回落系统 dotnet
+export PATH="$HOME/nodejs:$PATH"
+if [ -x "$HOME/.dotnet/dotnet" ] && ls "$HOME/.dotnet/sdk" 2>/dev/null | grep -qE '^10\.'; then
+  export PATH="$HOME/.dotnet:$PATH"
+  export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
+fi
 
 dotnet build LevelForge.slnx -c Debug
 dotnet test LevelForge.slnx -c Debug --no-build

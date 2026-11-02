@@ -3,8 +3,12 @@
 # 自动补用户级工具链 PATH；首次运行自动构建前端产物；随后启动平台并监听 http://localhost:5000
 set -euo pipefail
 cd "$(dirname "$0")"
-export PATH="$HOME/.dotnet:$HOME/nodejs:$PATH"
-export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
+# 用户级工具链：仅当用户级 dotnet 带 10.x SDK 时才优先（防止旧版用户级 SDK 遮蔽系统安装）
+export PATH="$HOME/nodejs:$PATH"
+if [ -x "$HOME/.dotnet/dotnet" ] && ls "$HOME/.dotnet/sdk" 2>/dev/null | grep -qE '^10\.'; then
+  export PATH="$HOME/.dotnet:$PATH"
+  export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
+fi
 
 if [ ! -d web/dist ]; then
   if command -v node >/dev/null 2>&1; then

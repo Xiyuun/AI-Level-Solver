@@ -118,7 +118,7 @@ harness-templates/                  对拍 harness 模板：unity-batchmode 骨�
 
 1. .NET SDK 10：已装 **10.0.403 用户级** `%USERPROFILE%\.dotnet`；Node.js：已装 **24.22.2 用户级** `%USERPROFILE%\nodejs`——build.sh/build.cmd 已自动把它们加进 PATH，直接跑即可。
 2. Git：仓库级 .git/config 已写身份（邓翔）；GitHub 凭据已缓存。
-3. 仓库根执行 `bash build.sh`：188 测试全绿（含前端）即环境就绪。
+3. 仓库根执行 `bash build.sh`：227 测试全绿（78 内核 + 31 玩具 + 75 平台 + 43 前端）即环境就绪。
 4. 前端开发：`cd web && npm run dev`（Vite 5173，代理 /api → localhost:5000）；平台 `dotnet run --project src/LevelForge.Platform --urls http://localhost:5000`。
 
 ## 七、第 16 步设计要点（回到有滑动猪仓库/Unity 环境的设备后开工即用）
@@ -142,7 +142,8 @@ harness-templates/                  对拍 harness 模板：unity-batchmode 骨�
 7. **曾由测试抓出的 bug**（保持这种"测试先红"的敏感度）：校验器在非矩形网格上越界（已加 ragged 守卫）；toy-005 关卡数据笔误目标数少 1；generation_candidates.content_json 误设 NOT NULL（api_error/无JSON 候选没有内容——第9步抓出）。
 8. **用户协作偏好**：授权全权实现、逐步推进，不需事事确认；设计文档一律不改；时间由用户灵活安排（额度可能随时中断——所以每步必须停在可提交边界）。
 9. **PROGRESS.md 维护规则**：每完成一步 commit 时，同步更新第二节进度表与第七节"下一步要点"，然后 push。
+10. **用户级旧 SDK 遮蔽系统 SDK**（公司机踩过）：`~/.dotnet` 若装有旧版 SDK（如 8.0.403），build/run 脚本无条件把它提到 PATH 最前会导致 MSB4068（8.0 不识别 .slnx/net10.0）。四个脚本已改为**仅当用户级 dotnet 存在 10.x SDK 时才优先**，否则回落系统 dotnet——两台设备（家：用户级 10.0.403；公司：系统 10.0.201 + 用户级 8.0.403）均验证通过。
 
 ## 九、新会话开场白（复制即用）
 
-> 读仓库根 PROGRESS.md（重点二、三、五、七、八节），再读设计文档目录中的《方案书.md》。遵守第五节工作约定，从第 10 步继续，每步测试全绿后 commit 并更新 PROGRESS.md，然后 push。
+> 读仓库根 PROGRESS.md（重点二、三、五、七、八节），再读设计文档目录中的《方案书.md》。遵守第五节工作约定，从第 16 步继续，每步测试全绿后 commit 并更新 PROGRESS.md，然后 push。

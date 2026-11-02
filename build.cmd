@@ -2,9 +2,12 @@
 rem LevelForge 一键构建+测试（Windows CMD）
 cd /d %~dp0
 
-rem 用户级工具链（新设备装在 %USERPROFILE%\.dotnet 与 %USERPROFILE%\nodejs，不动系统安装）
-set PATH=%USERPROFILE%\.dotnet;%USERPROFILE%\nodejs;%PATH%
-set DOTNET_ROOT=%USERPROFILE%\.dotnet
+rem Prefer user-level dotnet ONLY when it has a 10.x SDK (an old user-level 8.x must not shadow system SDK)
+set PATH=%USERPROFILE%\nodejs;%PATH%
+if exist "%USERPROFILE%\.dotnet\sdk\10.*" (
+  set PATH=%USERPROFILE%\.dotnet;%PATH%
+  set DOTNET_ROOT=%USERPROFILE%\.dotnet
+)
 
 dotnet build LevelForge.slnx -c Debug
 if errorlevel 1 exit /b 1
