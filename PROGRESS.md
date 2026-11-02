@@ -137,9 +137,8 @@ harness-templates/                  对拍 harness 模板：unity-batchmode 骨�
 - 平台侧：SlidePigFacade 注册（试用态，门2适用=true）、LevelImporter + `POST /api/games/slide-pig/import-levels`。
 - probe/ 三个诊断工具（单关探针/微基准/普查），保留在仓库可复用。
 
-**待用户回答的关键问题（影响稠密关结论的解读）**：
-- 这批超稠密关（60~120 实体）设计上是否保证**不使用道具**可通关？（游戏存在死局→复活/道具流程；
-  若道具是设计内的通关要素，"无道具模型不可解"就是正确结论而非求解器缺陷——规则矩阵需补充该资源条件声明。）
+**开发者已确认（2026-11-02）**：所有关卡设计上保证**不使用道具可通关**（全线游戏一致，无逼迫用道具的设定）
+——已落档 rule-matrix 第 5 条资源条件声明。因此稠密关"未知"= 求解器搜索不足，非关卡设计问题；搜索改进有据可依。
 
 **第 16 步剩余工作（下一步开工清单）**：
 1. harness 写入猪项目 `Assets/Editor/LevelForgeHarness/`（模板 `harness-templates/unity-batchmode/`）：

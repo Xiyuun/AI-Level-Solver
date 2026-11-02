@@ -18,8 +18,9 @@ var adapter = new SlidePigAdapter();
 var bundle = new AdapterBundle<SlidePigLevel, SlidePigState, SlidePigMove>("slidepig", "probe", adapter, adapter);
 
 Console.WriteLine($"关卡 {level.LevelId}：{level.MapWidth}x{level.MapHeight}，实体 {adapter.LoadLevel(level).Pigs.Count} 只");
+var solver = new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>();
 var sw = Stopwatch.StartNew();
-var result = new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>().Solve(bundle,
+var result = solver.Solve(bundle,
     new SolveRequest<SlidePigLevel>(level)
     {
         NodeBudget = 100_000_000,
@@ -27,6 +28,7 @@ var result = new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>().S
     });
 Console.WriteLine($"status={result.Status} optimality={result.Optimality} reason={result.TerminationReason}");
 Console.WriteLine($"解长={result.Solution.Count} 展开={result.Metrics?.StatesExplored} 去重={result.Metrics?.UniqueStates} 栈峰={result.Metrics?.FrontierPeak} 耗时={sw.ElapsedMilliseconds}ms");
+Console.WriteLine($"诊断：minH={solver.MinHeuristicSeen}（初始 h≈{level.Pigs.Count}，越接近 0=越接近清场）");
 if (result.Solution.Count > 0)
 {
     // 独立回放验证
