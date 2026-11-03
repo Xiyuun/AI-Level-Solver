@@ -270,11 +270,26 @@ namespace LevelForgeHarness
             return "incomplete";
         }
 
-        // 结算等待：逐帧轮询棋盘落定（PigManager.IsBoardSettled）+ 玩法就绪；禁固定 sleep——假对拍检查点
+        // 结算等待：逐帧轮询棋盘落定 + 玩法就绪 + 铁笼回收完毕（计数归零的铁笼要播完解锁动画并回收——
+        // 适配层模型在计数归零瞬间移除铁笼，动画属本次点击结算的一部分，等它结束才是同口径采样点）
         static async UniTask<bool> WaitForSettlement(PigManager pigs, GameManager flow, double timeoutSec, double overallDeadline)
         {
-            return await WaitUntil(() => pigs.IsBoardSettled() && flow.State == GameLoadState.Ready,
+            return await WaitUntil(
+                () => pigs.IsBoardSettled()
+                    && flow.State == GameLoadState.Ready
+                    && !AnyCagePendingRecycle(pigs),
                 timeoutSec, "棋盘落定", tolerateTimeout: true, overallDeadline: overallDeadline);
+        }
+
+        // 是否存在计数已归零但尚未回收的铁笼（解锁动画进行中；只读扫描）
+        static bool AnyCagePendingRecycle(PigManager pigs)
+        {
+            foreach (var p in pigs.SpawnedPigs)
+            {
+                if (p is Cage cage && cage.RemainUnlockCount <= 0)
+                    return true;
+            }
+            return false;
         }
 
         // 带超时的逐帧等待；超时可容忍时返回 false，否则抛异常

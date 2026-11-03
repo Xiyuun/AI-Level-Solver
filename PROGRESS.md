@@ -128,6 +128,13 @@ harness-templates/                  对拍 harness 模板：unity-batchmode 骨�
 harness 三处同步：`harness-templates/unity-batchmode/PairingHarness.cs`（模板，含实战记录）、
 `piggyfarm/Assets/Editor/LevelForgeHarness/`（原项目）、`_gate2copy`（测试副本，因原项目常开编辑器）。
 
+**★ 门2 批量对拍：17/20 全绿（2026-11-03）**：20 关抽样（覆盖全部机制与规模梯度），初始+逐步语义哈希
+全一致且真实 win 的 17 关；2 关制带口径差异（DumpTape 阶梯与普查不一致，对齐即可）；1 关（64）为
+**已查明的模型边界**：游戏"贴靠格被占向后回退"兜底（PigManager.TryFindFreeStopFootprint，物理停格与
+占用表粒度不一致时触发，游戏日志直接抓到"猪 69 向后调整 4 格"）无法在纯网格模型忠实复现——
+规则矩阵假设③已据此修订并附证据。诊断过程沉淀了单步/二分/确定性三件实验方法与 DiffStep/DiffAdjacent
+等勘查脚本（probe/）。harness 落定等待已补"铁笼回收完毕"（56/62/110 三关由此转绿）。
+
 **★ 求解覆盖大幅提升**：贪心 DFS 加"机动性平级排序+腾挪预算阶梯(8/16/32)"后，普查 110 关：31/75 可解
 （改进前 1/75）、44 诚实未知、35 子集外。91 号关 11 秒出 62 步解；91 猪的 110 号关 20 秒 122 步解——
 卡点是结构陷阱而非规模。门面已接线（稀疏 A*/稠密阶梯，按 40 实体分界）。
