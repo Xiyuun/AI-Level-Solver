@@ -121,33 +121,28 @@ harness-templates/                  对拍 harness 模板：unity-batchmode 骨�
 3. 仓库根执行 `bash build.sh`：227 测试全绿（78 内核 + 31 玩具 + 75 平台 + 43 前端）即环境就绪。
 4. 前端开发：`cd web && npm run dev`（Vite 5173，代理 /api → localhost:5000）；平台 `dotnet run --project src/LevelForge.Platform --urls http://localhost:5000`。
 
-## 七、第 16 步当前状态（2026-11-02，公司机推进）
+## 七、第 16 步当前状态（2026-11-03，公司机推进）
 
-**已完成（264 测试全绿）**：
-- 资格评估落定：游戏仓库 `E:\Projects\UnityProjects\PiggyFarm\piggyfarm`（Unity 2022.3.62f3c1，路径见此勿写死进代码）；
-  关卡源 = `Assets/Main/FrameWorkExtras/LevelData/Luban~/Datas/Levels/*.json`（110 个，**非 499**——499 为规划数）。
-- **v1 规则子集**：Normal/Boom/Spring/Long/Lock/SmallElephant/Cage/CageL（75 关）；Duck(26)/Rope/Scissors(9) 留 v2；
-  无地形/兔子/农场主（现有关卡数据未使用）。规则矩阵带源码证据在 `SlidePigArtifacts.RuleMatrix`（**待用户④审核确认**）。
-- 适配层全套：`SlidePigModels/Rules/Adapter/Validator/Artifacts` + 22 个测试（规则语义逐条 + 真实夹具关 1/13/31/61/71/91 + 门1全绿）。
-- **关键实测发现（普查数据）**：110 关里除 1 号关（6 猪）外全部 **61~122 实体**的超稠密关；
-  精确搜索（BFS/A*）30s 内全部未知（74 关）；61 号关贪心 DFS 10 分钟 2460 万展开/360 万去重仍未穷尽——稠密关=诚实报"未知"。
-  → 新增两个内核策略（这是《求解内核》§10"优化路径按需触发"的落地）：**AStarSolver**（可采纳启发式 h=剩余非笼实体数，
-  稀疏关最优解）与 **GreedyDfsSolver**（迭代式 DFS+启发式排序+置换表，任一解 Optimality=NotProven，穷尽才 UnsolvableProven）。
-  门面按实体数选策略（≥40 贪心）；两策略各有内核测试组。
-- 平台侧：SlidePigFacade 注册（试用态，门2适用=true）、LevelImporter + `POST /api/games/slide-pig/import-levels`。
-- probe/ 三个诊断工具（单关探针/微基准/普查），保留在仓库可复用。
+**★ 门2 冒烟对拍全绿（2026-11-02）**：PiggyFarm 1 号关在 Unity batchmode 下完成首次真机对拍——
+初始+全部 6 步语义哈希逐步一致、结局 win（游戏自身判定）。适配层网格模型 ↔ 真实游戏规则等价性经真机裁决通过。
+harness 三处同步：`harness-templates/unity-batchmode/PairingHarness.cs`（模板，含实战记录）、
+`piggyfarm/Assets/Editor/LevelForgeHarness/`（原项目）、`_gate2copy`（测试副本，因原项目常开编辑器）。
 
-**开发者已确认（2026-11-02）**：所有关卡设计上保证**不使用道具可通关**（全线游戏一致，无逼迫用道具的设定）
-——已落档 rule-matrix 第 5 条资源条件声明。因此稠密关"未知"= 求解器搜索不足，非关卡设计问题；搜索改进有据可依。
+**★ 求解覆盖大幅提升**：贪心 DFS 加"机动性平级排序+腾挪预算阶梯(8/16/32)"后，普查 110 关：31/75 可解
+（改进前 1/75）、44 诚实未知、35 子集外。91 号关 11 秒出 62 步解；91 猪的 110 号关 20 秒 122 步解——
+卡点是结构陷阱而非规模。门面已接线（稀疏 A*/稠密阶梯，按 40 实体分界）。
 
-**第 16 步剩余工作（下一步开工清单）**：
-1. harness 写入猪项目 `Assets/Editor/LevelForgeHarness/`（模板 `harness-templates/unity-batchmode/`）：
-   batchmode 加载 1 号关→按磁带 click 注入（走真实点击路径）→逐步语义状态对照 `SlidePigAdapter.ProjectSemanticState` 的 schema。
-   需读：GameManager.InitializeAsync 入关路径、点击入口（NormalPig.OnPointerClick→StartWalkingFromClick）、BoardSettled 落定信号。
-2. 向导走流程：import-levels 导入 110 关（75 入库）→ 门2 对拍（先 1 号关跑通，再抽 20）→ 门3 基准（稀疏关求解建基准，稠密关记录"未知"观察值）。
-3. 用户④人工审核 13 条清单（rule-matrix 确认人一列待签）→ 转正（status trial→production）。
-4. 回填 `skills/onboarding-skill/reference/` 内部版一节（SlidePig 兼任标准答案）。
-- 16 步之后：17 故障注入实验与演示证据（方案书 §10）→ 18 批量生产 P1 → 19 自包含打包发布（方案书 §8：解压即跑）。
+**已完成清单**：资格评估（v1 子集 75/110 关）、适配层全套+22 测试、A*+贪心DFS 双策略+内核测试组、
+SlidePigFacade（试用态）、关卡导入器+API、探针五件（Probe/Bench/Survey/Greedy/Tune/DumpTape/CompareTape）、
+harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对齐）、全套 264 测试绿。
+
+**剩余工作（下一步开工清单）**：
+1. **门2 批量对拍**：从 31 个可解关抽 20 关 → DumpTape 批量出磁带 → _gate2copy 逐关 batchmode → CompareTape 汇总。
+   注意：对拍跑 _gate2copy（原项目被编辑器占用）；磁带求解用门面口径（稠密关阶梯）。
+2. 门3 基准：可解关求解建基准（未知关记"未知"观察值）；导入 110 关入平台库（import-levels API）。
+3. 用户④人工审核 13 条清单（rule-matrix 确认人栏；无道具可解已确认✅）→ 转正（trial→production）。
+4. 回填 skill reference 内部版一节（SlidePig 兼任标准答案，harness 实战记录引用）。
+- 之后：17 故障注入实验与演示证据（方案书 §10）→ 18 批量 P1 → 19 打包发布。
 
 ## 八、已知坑与经验（原对话过程记录，避免新会话重踩）
 
@@ -163,7 +158,10 @@ harness-templates/                  对拍 harness 模板：unity-batchmode 骨�
 9. **PROGRESS.md 维护规则**：每完成一步 commit 时，同步更新第二节进度表与第七节"下一步要点"，然后 push。
 10. **用户级旧 SDK 遮蔽系统 SDK**（公司机踩过）：`~/.dotnet` 若装有旧版 SDK（如 8.0.403），build/run 脚本无条件把它提到 PATH 最前会导致 MSB4068（8.0 不识别 .slnx/net10.0）。四个脚本已改为**仅当用户级 dotnet 存在 10.x SDK 时才优先**，否则回落系统 dotnet——两台设备（家：用户级 10.0.403；公司：系统 10.0.201 + 用户级 8.0.403）均验证通过。
 11. **C# 多行原始字符串**：起始 `"""` 后必须**直接换行**，内容另起一行（`"""{...` 同行跟内容=语法错 CS1513 连锁报一大片）；单行内容才能同行闭合。踩过两次。
-12. **游戏项目侧事实**（PiggyFarm）：关卡 JSON 是 Luban 配置（`Luban~/Datas/Levels/`，110 个）；铁笼可与猪**叠放**（笼内猪被锁）；游戏死局会走复活/道具流程（无道具可解性未验证——见 §7 待用户回答项）。
+12. **游戏项目侧事实**（PiggyFarm）：关卡 JSON 是 Luban 配置（`Luban~/Datas/Levels/`，110 个）；铁笼可与猪**叠放**（笼内猪被锁）；游戏死局会走复活/道具流程（无道具可解性已由开发者确认保证✅）。
+13. **Unity Editor batchmode + PlayMode 陷阱**（harness 实战三坑）：①进 Play 触发 domain reload，静态字段与事件订阅全部重置——参数/状态必须存 `SessionState`（跨 reload 存活），用 `[InitializeOnLoadMethod]` 自动续跑；②Unity 2022 是 netstandard2.1 档——`Convert.ToHexString`/`SHA256.HashData`/`File.*Async` 部分 .NET5+ API 不可用，用 BitConverter+ComputeHash 替代；③对拍双方哈希必须同一规范化口径（平台 CanonicalJson 键字母序+schemaVer 载荷），harness 直接按规范化形态输出 JSON 再哈希。
+14. **原项目被编辑器占用时 batchmode 打不开**（HandleProjectAlreadyOpenInAnotherInstance）：复制测试副本（robocopy 排除 Library/Temp/Logs；注意 Git Bash 下 robocopy 参数要 `MSYS_NO_PATHCONV=1` 防路径转换，含中文目录名的 /XD 项会触发坑 4b 直接去掉）；对拍统一跑副本。
+15. **`dotnet run file.cs` 文件式应用禁用反射序列化**（JsonSerializerIsReflectionDisabled）：`#:property` 与 AppContext.SetSwitch 均无效——需制带/序列化的探针一律建正式 console 工程（probe/DumpTape 模式）。
 
 ## 九、新会话开场白（复制即用）
 
