@@ -17,7 +17,6 @@ if (idx >= 0 && double.TryParse(args[idx + 1], out var s)) seconds = s;
 
 var adapter = new SlidePigAdapter();
 var bundle = new AdapterBundle<SlidePigLevel, SlidePigState, SlidePigMove>("slidepig", "survey", adapter, adapter);
-var solver = new AStarSolver<SlidePigLevel, SlidePigState, SlidePigMove>();
 
 var solved = 0; var resource = 0; var unsupported = 0; var invalid = 0;
 var swAll = Stopwatch.StartNew();
@@ -34,11 +33,17 @@ foreach (var file in Directory.GetFiles(dir, "*.json").OrderBy(f => f))
     }
     var state = adapter.LoadLevel(level);
     var sw = Stopwatch.StartNew();
-    var r = solver.Solve(bundle, new SolveRequest<SlidePigLevel>(level)
+    // 改进配置：机动性排序 + 腾挪预算小阶梯（8→16→32），每档平分关卡预算
+    SolveResult r = new SolveResult(SolveStatus.ResourceLimit, Optimality.NotApplicable, false,
+        TerminationReason.TimeLimit, MetricsScope.ExpandedPrefix, [], null, "未运行");
+    var tierCap = seconds / 3;
+    foreach (var budget in new[] { 8, 16, 32 })
     {
-        NodeBudget = 20_000_000,
-        TimeBudget = TimeSpan.FromSeconds(seconds)
-    });
+        r = SolveTier(level, budget, tierCap);
+        if (r.Status == SolveStatus.Solved) break;
+        var remainMs = seconds * 1000 - sw.ElapsedMilliseconds;
+        if (remainMs < tierCap * 1000 * 0.2) break;                // 剩余预算不够再跑一档
+    }
     sw.Stop();
     if (r.Status == SolveStatus.Solved) solved++;
     else if (r.Status == SolveStatus.ResourceLimit) resource++;
@@ -47,3 +52,15 @@ foreach (var file in Directory.GetFiles(dir, "*.json").OrderBy(f => f))
         $"{sw.ElapsedMilliseconds,7}ms 解长={r.Solution.Count,3} 展开={r.Metrics?.StatesExplored} 去重={r.Metrics?.UniqueStates}");
 }
 Console.WriteLine($"==== 共{solved + resource + invalid + unsupported}关：solved={solved} resourceLimit={resource} invalid={invalid} unsupported={unsupported}，总耗时 {swAll.Elapsed.TotalMinutes:F1}min ====");
+
+// 单档求解（机动性 + 腾挪预算）
+SolveResult SolveTier(SlidePigLevel lv, int budget, double sec)
+{
+    var solver = new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>(
+        new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>.Options(MobilityTiebreak: true, ShuffleBudget: budget));
+    return solver.Solve(bundle, new SolveRequest<SlidePigLevel>(lv)
+    {
+        NodeBudget = 20_000_000,
+        TimeBudget = TimeSpan.FromSeconds(sec)
+    });
+}

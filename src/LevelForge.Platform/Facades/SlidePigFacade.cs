@@ -25,10 +25,49 @@ public sealed class SlidePigFacade : IGameFacade
         "slide-pig", AdapterVersionValue, AdapterInstance, AdapterInstance);
 
     // 求解策略：按关卡规模选择（求解内核 §2 策略选择——适配层能力+状态空间规模）
-    // 普查实测：除 1 号关（6 猪）外全部 61~122 实体；稠密关 A* 30s 全部未知 → 稠密关改贪心 DFS 找任一解
+    // 普查实测（110 关）：除 1 号关（6 猪）外全部 61~122 实体；机动性+腾挪预算阶梯把可解覆盖从 1/75 提到 31/75
     private const int DensePigThreshold = 40;
     private static readonly AStarSolver<SlidePigLevel, SlidePigState, SlidePigMove> OptimalStrategy = new();
-    private static readonly GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove> AnySolutionStrategy = new();
+
+    // 稠密关求解（实例方法：收尾要用 Registration.AdapterHash）：机动性排序 + 腾挪预算阶梯（8→16→32，预算平分）
+    private PlatformSolve SolveDense(
+        AdapterBundle<SlidePigLevel, SlidePigState, SlidePigMove> bundle, SlidePigLevel level, SolveCommand command, string? runConfigHash)
+    {
+        var totalMs = (long)(command.TimeBudget?.TotalMilliseconds ?? 30_000);
+        var tiers = new[] { 8, 16, 32 };
+        var tierMs = Math.Max(1000, totalMs / tiers.Length);
+        var budget = command.NodeBudget;
+        SolveResult best = new SolveResult(
+            SolveStatus.ResourceLimit, Optimality.NotApplicable, false,
+            TerminationReason.TimeLimit, MetricsScope.ExpandedPrefix, [], null, "稠密关求解未运行");
+        foreach (var shuffle in tiers)
+        {
+            var solver = new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>(
+                new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>.Options(
+                    MobilityTiebreak: true, ShuffleBudget: shuffle));
+            var r = solver.Solve(bundle, new SolveRequest<SlidePigLevel>(
+                level, TimeSpan.FromMilliseconds(tierMs), budget, command.MemoryBudgetBytes, command.FullEnumeration));
+            if (r.Status == SolveStatus.Solved) { best = r; break; }
+            if (best.Status != SolveStatus.Solved) best = r;
+        }
+        return FinishSolve(bundle, level, command, best, runConfigHash);
+    }
+
+    // 求解结果收尾：制带（有解时）+ 难度评估（两策略共用；Registration 属实例成员故为实例方法）
+    private PlatformSolve FinishSolve(
+        AdapterBundle<SlidePigLevel, SlidePigState, SlidePigMove> bundle, SlidePigLevel level, SolveCommand command,
+        SolveResult result, string? runConfigHash)
+    {
+        SolutionTape? tape = null;
+        if (result.Status == SolveStatus.Solved)
+        {
+            tape = new ReplayEngine().RecordTape(bundle, level, command.LevelFileBytes, result,
+                new TapeMetadata(command.LevelRef, Registration.AdapterHash, runConfigHash));
+        }
+        var features = FeatureExtractor.Extract(bundle, result);
+        var difficulty = DifficultyModel.Evaluate(features, result.Status, SlidePigArtifacts.DefaultDifficultyWeights);
+        return new PlatformSolve(result, tape, difficulty, runConfigHash);
+    }
 
     public GameRegistration Registration { get; } = new(
         "slide-pig",
@@ -86,21 +125,15 @@ public sealed class SlidePigFacade : IGameFacade
         {
             return InvalidOutcome(runConfigHash, "关卡 JSON 解析失败：缺少 levelId/mapWidth/mapHeight/pigs 等必要字段");
         }
-        // 稀疏关 A*（最优解，难度评分准确）；稠密关贪心 DFS（任一解，Optimality=NotProven 如实标注）
-        LevelForge.Kernel.Search.ISearchStrategy<SlidePigLevel, SlidePigState, SlidePigMove> strategy =
-            level.Pigs.Count >= DensePigThreshold ? AnySolutionStrategy : OptimalStrategy;
+        // 稀疏关 A*（最优解）；稠密关机动性+预算阶梯（任一解，NotProven 如实标注）
+        if (level.Pigs.Count >= DensePigThreshold)
+        {
+            return SolveDense(Bundle, level, command, runConfigHash);
+        }
         var request = new SolveRequest<SlidePigLevel>(
             level, command.TimeBudget, command.NodeBudget, command.MemoryBudgetBytes, command.FullEnumeration);
-        var result = new SolveExecutor().Solve(Bundle, request, strategy);
-        SolutionTape? tape = null;
-        if (result.Status == SolveStatus.Solved)
-        {
-            tape = new ReplayEngine().RecordTape(Bundle, level, command.LevelFileBytes, result,
-                new TapeMetadata(command.LevelRef, Registration.AdapterHash, runConfigHash));
-        }
-        var features = FeatureExtractor.Extract(Bundle, result);
-        var difficulty = DifficultyModel.Evaluate(features, result.Status, SlidePigArtifacts.DefaultDifficultyWeights);
-        return new PlatformSolve(result, tape, difficulty, runConfigHash);
+        var result = new SolveExecutor().Solve(Bundle, request, OptimalStrategy);
+        return FinishSolve(Bundle, level, command, result, runConfigHash);
     }
 
     // 门1五项合规检查：样本组装（维度对/纯函数样本/确定性代表关）后交 AdapterHosting
