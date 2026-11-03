@@ -56,7 +56,8 @@ public class SlidePigFacadeTests
         using var client = factory.CreateClient();
         var games = await client.GetFromJsonAsync<JsonElement[]>("/api/games");
         var slidePig = games!.First(g => g.GetProperty("gameId").GetString() == "slide-pig");
-        Assert.Equal("trial", slidePig.GetProperty("status").GetString());
+        // 2026-11-03 转正：三门+人工审核完成后注册为生产中
+        Assert.Equal("production", slidePig.GetProperty("status").GetString());
         Assert.True(slidePig.GetProperty("gate2Applicable").GetBoolean());   // 有真机本体：门2适用
     }
 }

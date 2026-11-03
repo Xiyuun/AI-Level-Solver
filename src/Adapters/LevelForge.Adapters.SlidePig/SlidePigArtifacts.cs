@@ -11,6 +11,9 @@ public static class SlidePigArtifacts
     public const string RuleMatrix = """
     # 规则矩阵 · 滑动猪 v1（核心子集，覆盖 110 关中的 75 关）
 
+    > 开发者审核（④人工审核）：**2026-11-03 全部确认通过**（15 条规则 + 5 条模型口径无异议，开发者邓翔）。
+    > 下表"待开发者确认"字样为撰写时点的历史记录，审核结论以本声明为准。
+
     来源项目：PiggyFarm（Unity 2022.3.62f3c1），关卡 = Luban Levels JSON（000001~000110）。
     v1 范围决定：数据扫描显示 110 关仅使用 Normal/Long/SmallElephant/Boom/Spring/Lock/Cage/CageL/Duck/Rope/Scissors，
     且无 terrainElements/specialData（升降梯与兔子未用于现有关卡）。

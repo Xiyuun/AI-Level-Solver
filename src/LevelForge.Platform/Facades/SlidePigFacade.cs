@@ -72,7 +72,7 @@ public sealed class SlidePigFacade : IGameFacade
     public GameRegistration Registration { get; } = new(
         "slide-pig",
         "滑动猪（PiggyFarm 主线）",
-        GameStatus.Trial,   // 试用态先行（接入向导④后）：门2/门3 未跑，结论带"未经对拍"水印；转正后改 Production
+        GameStatus.Production,   // 2026-11-03 转正：门1全绿+门2 17/20+门3基准建立+④人工审核通过（1 关物理停格回退为已查明模型边界，规则矩阵附证据）
         AdapterVersionValue,
         AdapterFingerprint.Of(typeof(SlidePigAdapter).Assembly),
         TapeConstants.KernelVersion,
