@@ -31,7 +31,7 @@ else
 {
     result = new SolveResult(SolveStatus.ResourceLimit, Optimality.NotApplicable, false,
         TerminationReason.TimeLimit, MetricsScope.ExpandedPrefix, [], null, "未运行");
-    foreach (var budget in new[] { 8, 32, 128 })
+    foreach (var budget in new[] { 8, 16, 32 })
     {
         var solver = new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>(
             new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>.Options(MobilityTiebreak: true, ShuffleBudget: budget));
