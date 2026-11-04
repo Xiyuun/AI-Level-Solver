@@ -336,7 +336,7 @@ export function Workbench({ game, detail, onOpenOnboarding }: {
                 <textarea
                   value={form.specialRequirements}
                   onChange={(e) => setForm({ ...form, specialRequirements: e.target.value })}
-                  placeholder="例：必须包含 3 只朝下的猪；炸弹最多 1 次"
+                  placeholder="例：必须包含 3 个可破坏方块；道具最多 1 次"
                   className={form.adjustedFields.includes('specialRequirements') ? 'auto-adjusted' : ''}
                 />
               </label>

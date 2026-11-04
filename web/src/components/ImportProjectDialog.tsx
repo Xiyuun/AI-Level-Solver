@@ -21,7 +21,7 @@ export function ImportProjectDialog({
 
   const doImport = async () => {
     if (!directory.trim()) {
-      setError('请输入项目目录的绝对路径（例如 D:\\Projects\\PiggyFarm）')
+      setError('请输入项目目录的绝对路径（例如 E:\\Projects\\CocosProjects\\MyGame）')
       return
     }
     setBusy(true)
@@ -48,7 +48,7 @@ export function ImportProjectDialog({
           <input
             value={directory}
             onChange={(e) => setDirectory(e.target.value)}
-            placeholder="D:\Projects\PiggyFarm"
+            placeholder="E:\Projects\CocosProjects\MyGame"
             onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void doImport() }}
             autoFocus
           />

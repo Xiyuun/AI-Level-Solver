@@ -236,6 +236,10 @@ export async function importProject(directory: string): Promise<ProjectImportRes
 
 export const recentProjects = () => getJson<string[]>('/api/projects/recent')
 
+// 删除导入项目（从0重测）：级联清玩法行/向导存档/关卡/验证记录；仅限未注册适配层的导入项目
+export const deleteProject = (gameId: string) =>
+  sendJson<{ deleted: boolean; tapeFilesRemoved: number }>(`/api/projects/${gameId}`, 'DELETE')
+
 // 项目重扫（向导内：项目内容变化后触发）与关卡根目录确认（向导①）
 export const rescanProject = (gameId: string) =>
   sendJson<{ gameId: string; engineType: string; projectRoot: string }>(`/api/games/${gameId}/rescan`, 'POST')

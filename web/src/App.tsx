@@ -136,7 +136,15 @@ export function App() {
           ) : tab === 'batch' ? (
             <Batch game={current} />
           ) : tab === 'onboarding' ? (
-            <Onboarding game={current} detail={detail} onStatusChanged={() => void refreshAll()} />
+            <Onboarding
+              game={current}
+              detail={detail}
+              onStatusChanged={() => void refreshAll()}
+              onProjectDeleted={() => {
+                // 项目已删：refreshGames 发现当前玩法不在列表里会自动回落到第一个玩法
+                void refreshGames()
+              }}
+            />
           ) : (
             <Settings onGamesChanged={() => void refreshAll()} onThemeChanged={() => void refreshTheme()} />
           )

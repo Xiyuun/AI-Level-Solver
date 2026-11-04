@@ -4,6 +4,7 @@
 // 平台仍不做适配层生成（冻结决策）：智能在需求包引导的外部 AI，页面负责喂足事实与验收编排
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  deleteProject,
   getOnboarding,
   rescanProject,
   runGate1,
@@ -27,7 +28,12 @@ import {
 } from '../state/onboarding'
 import { ImportPanel } from '../components/ImportPanel'
 
-export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummary; detail: GameDetail; onStatusChanged: () => void }) {
+export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: {
+  game: GameSummary
+  detail: GameDetail
+  onStatusChanged: () => void
+  onProjectDeleted?: () => void
+}) {
   const [tasks, setTasks] = useState<OnboardingTask[]>([])
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -329,6 +335,31 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
         {allStepsDone(tasks) && game.status !== 'production' && (
           <button className="primary" onClick={() => void promote('production')}>
             六步完成 · 转正上线（production）
+          </button>
+        )}
+        {detail.projectRoot && (
+          <button
+            className="cl-del"
+            onClick={() => {
+              if (window.confirm(`删除「${game.displayName}」在平台内的全部登记数据（玩法行/向导存档/关卡/验证记录）？不可恢复。`)) {
+                void (async () => {
+                  setBusy(true)
+                  setError('')
+                  try {
+                    await deleteProject(game.gameId)
+                    onProjectDeleted?.()
+                  } catch (e) {
+                    setError((e as Error).message)
+                  } finally {
+                    setBusy(false)
+                  }
+                })()
+              }
+            }}
+            disabled={busy}
+            title="删除该项目在平台内的全部数据（从0重测）"
+          >
+            删除本项目
           </button>
         )}
       </div>

@@ -143,6 +143,46 @@ public sealed class GameStore
         return cmd.ExecuteNonQuery() == 1;
     }
 
+    // 删除导入项目：子表 → 父表按外键序清理，返回磁带文件路径供调用方删文件。
+    // 只删 project_root 非空的行（导入项目）；内置/静态注册玩法由 SQL 条件兜底拒绝
+    public (bool Deleted, List<string> TapeFiles) DeleteImportedGame(string gameId)
+    {
+        using var conn = _db.Open();
+        var tapeFiles = new List<string>();
+        using (var collect = conn.CreateCommand())
+        {
+            collect.CommandText = """
+                SELECT t.file_path FROM tapes t
+                JOIN solve_runs s ON s.tape_id = t.id
+                WHERE s.game_id = $g
+                """;
+            collect.Parameters.AddWithValue("$g", gameId);
+            using var reader = collect.ExecuteReader();
+            while (reader.Read()) tapeFiles.Add(reader.GetString(0));
+        }
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM generation_candidates WHERE run_id IN (SELECT id FROM generation_runs WHERE game_id = $g);
+            DELETE FROM generation_runs WHERE game_id = $g;
+            DELETE FROM tapes WHERE run_id IN (SELECT id FROM solve_runs WHERE game_id = $g);
+            UPDATE solve_runs SET tape_id = NULL WHERE game_id = $g;
+            DELETE FROM solve_runs WHERE game_id = $g;
+            DELETE FROM execution_confirmations WHERE game_id = $g;
+            DELETE FROM baselines WHERE game_id = $g;
+            DELETE FROM verification_records WHERE game_id = $g;
+            DELETE FROM levels WHERE game_id = $g;
+            DELETE FROM onboarding_tasks WHERE game_id = $g;
+            DELETE FROM phrases WHERE game_id = $g;
+            DELETE FROM games WHERE id = $g AND project_root IS NOT NULL;
+            """;
+        cmd.Parameters.AddWithValue("$g", gameId);
+        using var tx = conn.BeginTransaction();
+        cmd.Transaction = tx;
+        var affected = cmd.ExecuteNonQuery();
+        tx.Commit();
+        return (affected > 0, tapeFiles);
+    }
+
     // 关卡登记 upsert：安全落盘成功后调用（同编号覆盖内容与哈希；来源随调用方）
     public void UpsertLevel(string gameId, string levelId, string levelHash, string contentJson, string source)
     {

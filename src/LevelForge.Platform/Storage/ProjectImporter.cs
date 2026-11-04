@@ -88,6 +88,9 @@ public sealed class ProjectImporter(GameStore games, AppDatabase db, SettingsSto
         }
     }
 
+    // 数据目录（删除项目时清理磁带文件用）
+    public string TapeDirectory() => db.DataDir;
+
     #region 引擎识别
 
     // 识别结果：unity / cocos-creator3 / cocos-creator2；识别不了返回 null，依据里带目录内容帮助用户对照

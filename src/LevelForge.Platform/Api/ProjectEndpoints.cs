@@ -1,4 +1,5 @@
 using LevelForge.Platform.Database;
+using LevelForge.Platform.Facades;
 using LevelForge.Platform.Storage;
 
 namespace LevelForge.Platform.Api;
@@ -68,6 +69,56 @@ public static class ProjectEndpoints
             return games.UpdateLevelsRoot(gameId, body.LevelsRoot.Trim())
                 ? Results.Ok(new { levelsRoot = body.LevelsRoot.Trim() })
                 : Results.NotFound(new { message = $"未知玩法：{gameId}" });
+        });
+
+        // 删除导入项目（从0重测）：仅限导入的、未注册适配层、未转正的玩法；级联清全部登记数据
+        app.MapDelete("/api/projects/{gameId}", (string gameId, ProjectImporter importer, GameStore games,
+            GameRegistry registry, SettingsStore settings) =>
+        {
+            var game = games.FindGame(gameId);
+            if (game is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            if (registry.TryGet(gameId, out _))
+            {
+                return Results.Conflict(new { message = "该玩法适配层已注册（内置或已接入），不可删除" });
+            }
+            if (string.IsNullOrWhiteSpace(game.ProjectRoot))
+            {
+                return Results.Conflict(new { message = "该玩法不是导入的项目，不可删除" });
+            }
+            if (game.Status == "production")
+            {
+                return Results.Conflict(new { message = "已转正玩法不可直接删除：先回退状态再删除" });
+            }
+            var (deleted, tapeFiles) = games.DeleteImportedGame(gameId);
+            if (!deleted)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            // 磁带文件尽力而为清理
+            var tapeDir = Path.Combine(importer.TapeDirectory(), "tapes");
+            var removed = 0;
+            foreach (var f in tapeFiles)
+            {
+                try
+                {
+                    var full = Path.IsPathRooted(f) ? f : Path.Combine(tapeDir, Path.GetFileName(f));
+                    if (File.Exists(full)) { File.Delete(full); removed++; }
+                }
+                catch (IOException) { }
+            }
+            // 指针清理：活跃玩法指向被删玩法则回落；最近导入列表去掉该项目目录
+            var active = settings.Get("ui.activeGame", "") ?? "";
+            if (active == gameId)
+            {
+                var fallback = games.ListGames().FirstOrDefault()?.Id ?? "";
+                if (fallback.Length > 0) settings.Set("ui.activeGame", fallback);
+            }
+            var recent = importer.RecentDirectories().Where(d => d != game.ProjectRoot).ToList();
+            settings.Set("ui.recentProjects", recent);
+            return Results.Ok(new { deleted = true, tapeFilesRemoved = removed });
         });
     }
 }

@@ -61,7 +61,7 @@ export function PhrasePicker({ gameId, onInsert }: { gameId: string; onInsert: (
           <div className="phrase-add">
             <input
               value={draft}
-              placeholder="新短语，如：必须包含 3 只朝下的猪"
+              placeholder="新短语，如：必须包含 3 个可破坏方块"
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void add()}
             />
