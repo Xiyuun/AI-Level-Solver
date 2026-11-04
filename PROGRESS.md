@@ -225,3 +225,12 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
 - **移除内置滑动猪**：GameRegistry 反注册 + 清库（75 关/78 求解/7 生成/33 磁带/2 短语）；`SlidePigFacade`+`Adapters.SlidePig` 源码保留——**piggyfarm 适配层的参考实现**（含 `77f6cf7` WIP：另一会话已实现 ILevelComposer 脚印推导，1 万头真猪验证，token 预算随之 8192→2048；该 WIP 曾使 ComposerTests 旧断言失败，本轮改为下限守卫修复）。
 - 首轮全流程测试的适配层路径走**重编译+重启**（GameRegistry 冻结决策）；插件热加载（D7=A）见三轮 §十三 阶段 C 后续。
 - 测试：后端 261→268（+7 导入/护栏用例）+ 前端 73，全绿；HTTP 全链路冒烟 8 项通过（导入/护栏/任务种子/404 口径）。
+
+### 10.6 三轮·N12 完整版：接入向导项目化（2026-11-04 深夜，`4734535`）
+
+用户实测判定向导为"死页面"（导入后内容瞬出、产物假绿、13 条清单写死、门2文案误导）。根因三层：冻结的"薄页面"设计（平台只存档不分析）+ 为已注册玩法写的验收逻辑套在导入玩法上 + slide-pig 时代文案焊死成前端常量。落地：
+
+- **ProjectScanner**（真实扫描，不猜语义）：JSON 全量收集（跳引擎/构建目录、限深限量）→ 关卡目录候选按聚簇排序（numbered/levelPrefixed/mixed）→ 每候选抽最小 2 个文件解析顶层键 → 机器观察只述事实。真实 mahjong 项目验证：扫出 `assets/resources/LevelData/` 43 关（numbered）+ 真实关卡 schema（chessCount/mapWidth/chesses/obstacles/countdown…）。
+- **v3 迁移** games.project_profile_json；导入即扫描；`POST /api/games/{id}/rescan` 重扫；`PUT /api/games/{id}/levels-root` 真回填；门2"不适用"可无驱动命令登记（导入默认未评估 → 用户显式确认）。
+- **向导五步全部画像驱动**：①候选预填+真回填+适用性显式选择 ②机器事实表格+AI 判断存档（平台不冒充判断）③产物假绿整块隐藏（适配层产出后才验收）+需求包内嵌扫描事实 ④清单=模板+画像派生条目（◆标记）、可增删、按玩法持久化在 step4 detail_json。
+- 测试：后端 268→271 + 前端 73→75 全绿。生成/求解/门1~3/采纳/批量经核对均为真实后端逻辑（有测试与库证据），向导是唯一静态区——本轮已消除。
