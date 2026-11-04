@@ -57,12 +57,14 @@ var app = builder.Build();
 database.Initialize();
 GameSeeder.Seed(database, app.Services.GetRequiredService<GameRegistry>());
 
-// 前端构建产物托管（web/dist 存在时）：静态文件 + SPA fallback；开发期走 Vite dev server 代理
-var distDir = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "..", "web", "dist"));
-var hasDist = Directory.Exists(distDir);
+// 前端构建产物托管：开发模式找仓库 web/dist，自包含发布找 exe 同级 wwwroot
+var devDist = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "..", "web", "dist"));
+var pubWwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+var distDir = Directory.Exists(devDist) ? devDist : (Directory.Exists(pubWwwroot) ? pubWwwroot : null);
+var hasDist = distDir is not null;
 if (hasDist)
 {
-    var fileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(distDir);
+    var fileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(distDir!);
     app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
     app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
 }

@@ -17,3 +17,6 @@ data/
 # 系统杂项
 Thumbs.db
 .DS_Store
+publish/
+!publish/README.md
+!publish/start.cmd
