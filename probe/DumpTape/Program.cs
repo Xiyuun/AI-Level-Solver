@@ -13,12 +13,24 @@ AppContext.SetSwitch("System.Text.Json.Serialization.JsonSerializerIsReflectionE
 var levelPath = args.Length > 0 ? args[0]
     : @"E:\Projects\UnityProjects\PiggyFarm\piggyfarm\Assets\Main\FrameWorkExtras\LevelData\Luban~\Datas\Levels\000001.json";
 var outDir = args.Length > 1 ? args[1] : Path.Combine(Path.GetTempPath(), "levelforge-gate2");
+// 可选第3参：故障模式（boomNoDecrement/oddPigsFrozen/stateKeyIgnoresCounters——第17步故障注入实验）
+var faultName = args.Length > 2 ? args[2] : "none";
+var fault = faultName switch
+{
+    "boomNoDecrement" => SlidePigFault.BoomNeverDecrements,
+    "oddPigsFrozen" => SlidePigFault.OddPigsFrozen,
+    "stateKeyIgnoresCounters" => SlidePigFault.StateKeyIgnoresCounters,
+    _ => SlidePigFault.None
+};
 Directory.CreateDirectory(outDir);
 
 var levelJson = File.ReadAllText(levelPath);
 var level = SlidePigLevel.FromJson(levelJson);
-var adapter = new SlidePigAdapter();
-var bundle = new AdapterBundle<SlidePigLevel, SlidePigState, SlidePigMove>("slide-pig", "0.1.0", adapter, adapter);
+// 故障模式用装饰适配层包；正常模式用原适配层包
+var bundle = fault == SlidePigFault.None
+    ? new AdapterBundle<SlidePigLevel, SlidePigState, SlidePigMove>("slide-pig", "0.1.0", new SlidePigAdapter(), new SlidePigAdapter())
+    : SlidePigFaultAdapter.CreateBundle(fault);
+var adapter = bundle.Game;
 
 // 稀疏关 A*（1 号关）；稠密关走机动性+预算阶梯（与门面同构的简化版：预算 8→32）
 SolveResult result;
