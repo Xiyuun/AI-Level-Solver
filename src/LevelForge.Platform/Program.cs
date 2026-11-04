@@ -65,11 +65,11 @@ var pubWwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
 var distDir = Directory.Exists(devDist) ? devDist : (Directory.Exists(pubWwwroot) ? pubWwwroot : null);
 var hasDist = distDir is not null;
 if (hasDist)
-{
-    var fileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(distDir!);
-    app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
-}
+    {
+        var fileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(distDir ?? string.Empty);
+        app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
+        app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
+    }
 
 GameEndpoints.Map(app);
 ProjectEndpoints.Map(app);
@@ -89,7 +89,7 @@ if (hasDist)
     app.MapFallback(async (HttpContext ctx) =>
     {
         ctx.Response.ContentType = "text/html; charset=utf-8";
-        await ctx.Response.SendFileAsync(Path.Combine(distDir, "index.html"));
+        await ctx.Response.SendFileAsync(Path.Combine(distDir ?? string.Empty, "index.html"));
     });
 }
 else
