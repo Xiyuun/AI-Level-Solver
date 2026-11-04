@@ -305,6 +305,47 @@ button:disabled { opacity: 0.5; cursor: default; }
 .checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 12.5px; }
 .checklist label { display: flex; gap: 6px; align-items: flex-start; }
 .checklist .group-chip { font-size: 10.5px; padding: 0 5px; border-radius: 4px; background: var(--chip-bg); color: var(--text-3); }
+
+/* 向导单选选项组（①关卡目录候选/门2适用性）：紧凑排列，radio 贴文字，不套两列 grid */
+.ob-options { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; font-size: 13px; }
+.ob-option {
+  display: flex; gap: 8px; align-items: baseline; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--surface);
+}
+.ob-option:has(input:checked) { border-color: var(--accent, #4a6cf7); background: var(--surface-2); }
+.ob-option input { flex: none; margin: 0; }
+.ob-option .ob-option-main { flex: 1; min-width: 0; word-break: break-all; }
+.ob-option .ob-option-meta { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+
+/* ④可编辑清单：单列行式布局，文本占满、删除按钮/徽章不裁切 */
+.cl-list { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; margin: 6px 0; }
+.cl-item {
+  display: flex; gap: 8px; align-items: flex-start; padding: 5px 8px;
+  border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface);
+}
+.cl-item input { flex: none; margin-top: 2px; }
+.cl-item .cl-text { flex: 1; min-width: 0; word-break: break-all; }
+.cl-item .group-chip { flex: none; font-size: 10.5px; padding: 0 5px; border-radius: 4px; background: var(--chip-bg); color: var(--text-3); }
+.cl-item .cl-badge { flex: none; color: var(--ok); font-size: 11px; white-space: nowrap; }
+.cl-item .cl-del {
+  flex: none; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-3);
+  border-radius: 6px; padding: 1px 8px; font-size: 11px; cursor: pointer;
+}
+.cl-item .cl-del:hover { color: var(--danger, #c0392b); border-color: var(--danger, #c0392b); }
+
+/* ③"开始生成适配层"引导卡 */
+.adapter-launch {
+  border: 2px solid var(--accent, #4a6cf7); border-radius: 12px; padding: 16px 18px;
+  background: var(--surface); margin: 8px 0;
+}
+.adapter-launch h4 { margin: 0 0 6px; font-size: 15px; }
+.adapter-launch .dialog-note { margin: 4px 0 10px; }
+.adapter-handoff { margin-top: 12px; }
+.adapter-handoff ol { margin: 6px 0; padding-left: 20px; font-size: 13px; line-height: 1.7; }
+.ob-locked {
+  color: var(--text-muted); font-size: 13px; padding: 10px 12px;
+  border: 1px dashed var(--border); border-radius: 8px; background: var(--surface-2);
+}
 .gate3-summary { margin-top: 10px; font-size: 13px; }
 .gate3-row { padding: 2px 0; }
 .verdict-red { color: var(--danger); font-weight: 600; }

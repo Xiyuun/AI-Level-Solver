@@ -307,6 +307,15 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
 
   const gate3Zones = gate3 ? groupGate3(gate3.rows) : null
 
+  // ③"开始生成适配层"引导卡展开态
+  const [launchOpen, setLaunchOpen] = useState(false)
+
+  // 顺序解锁（一步接一步）：①完成→②解锁；②完成/受阻→③解锁；④⑤⑥需适配层就绪
+  const step1Done = statusOf(1) === 'done'
+  const step2Unlocked = step1Done
+  const step3Unlocked = step2Unlocked && (statusOf(2) === 'done' || statusOf(2) === 'blocked')
+  const verifyUnlocked = step3Unlocked && game.adapterReady   // ④⑤⑥：适配层产出后才有验收对象
+
   return (
     <div className="onboarding">
       {message && <div className="ok-message">{message}</div>}
@@ -357,17 +366,17 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
           {profile && profile.levelDirCandidates.length > 0 ? (
             <>
               <div className="ob-note">关卡根目录候选（来自项目扫描，按 JSON 聚簇相似度排序）——选定后真回填平台库：</div>
-              <div className="checklist">
-                {profile.levelDirCandidates.map((c, i) => (
-                  <label key={c.directory}>
+              <div className="ob-options">
+                {profile.levelDirCandidates.map((c) => (
+                  <label key={c.directory} className="ob-option">
                     <input
                       type="radio"
                       name="level-root"
                       checked={chosenRoot === c.directory}
                       onChange={() => { setChosenRoot(c.directory); setManualRoot('') }}
                     />
-                    <span className="group-chip">{String.fromCharCode(65 + i)}</span>
-                    <code>{c.directory}/</code> — {c.jsonCount} 个 JSON（{c.namingHint}）
+                    <span className="ob-option-main"><code>{c.directory}/</code></span>
+                    <span className="ob-option-meta">{c.jsonCount} 个 JSON · {c.namingHint}</span>
                   </label>
                 ))}
               </div>
@@ -390,14 +399,14 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
           {detail.levelsRoot && <div className="ob-note">当前已保存：<code>{detail.levelsRoot}</code></div>}
 
           <div className="ob-note" style={{ marginTop: 12 }}>门2（真机对拍）适用性——这是你的判断，工具不替你猜：</div>
-          <div className="ob-form-row">
-            <label className="checklist">
+          <div className="ob-options">
+            <label className="ob-option">
               <input type="radio" name="gate2-choice" checked={gate2Choice === 'applicable'} onChange={() => setGate2Choice('applicable')} />
-              适用（我有游戏本体可对拍）
+              <span className="ob-option-main">适用（我有游戏本体可对拍）</span>
             </label>
-            <label className="checklist">
+            <label className="ob-option">
               <input type="radio" name="gate2-choice" checked={gate2Choice === 'not'} onChange={() => setGate2Choice('not')} />
-              不适用（无独立游戏本体/暂不对拍）
+              <span className="ob-option-main">不适用（无独立游戏本体/暂不对拍）</span>
             </label>
           </div>
           {gate2Choice === 'applicable' && (
@@ -418,9 +427,13 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
           )}
         </section>
 
-        {/* ②资格评估：机器事实（真扫描）+ 外部 AI 判断的存档 */}
+        {/* ②资格评估：机器事实（真扫描）+ 外部 AI 判断的存档；①完成后解锁 */}
         <section className={`ob-step ${statusOf(2) === 'done' ? 'step-done' : ''}`}>
           <h4>{stepTitle(2)} <span className={chip(statusOf(2))}>{statusOf(2)}</span></h4>
+          {!step2Unlocked ? (
+            <div className="ob-locked">🔒 完成①登记后解锁本步。</div>
+          ) : (
+          <>
           {profile ? (
             <>
               <div className="ob-note">以下是<b>项目扫描的机器事实</b>（平台真实读取目录得出，不含语义判断）：</div>
@@ -448,25 +461,44 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
           )}
           <textarea value={report} onChange={(e) => setReport(e.target.value)} placeholder="四问结论 + 证据（文件:行号）+ 卫生度分级与工作量预估" />
           <button onClick={() => void submitReport()}>{report.trim() ? '存档并完成' : '标记受阻（未提供报告）'}</button>
+          </>
+          )}
         </section>
 
-        {/* ③产物验收 + 门1 */}
+        {/* ③开始生成适配层：②完成后解锁；醒目引导卡——复制需求包交给 AI，完成后验证 */}
         <section className={`ob-step ${statusOf(3) === 'done' ? 'step-done' : ''}`}>
           <h4>{stepTitle(3)} <span className={chip(statusOf(3))}>{statusOf(3)}</span></h4>
-          {!game.adapterReady && (
-            <div className="adapter-guide">
-              <div className="ob-note">
-                「{game.displayName}」还没有适配层。把下面的需求包交给你的 AI 编程助手（如 ZCode / Cursor）执行；
-                完成后<b>重新构建平台并重启</b>，回到本页运行门1。
+          {!step3Unlocked ? (
+            <div className="ob-locked">🔒 完成②资格评估（存档结论或标记受阻）后解锁本步。</div>
+          ) : !game.adapterReady ? (
+            <div className="adapter-launch">
+              <h4>开始生成「{game.displayName}」的求解器适配层</h4>
+              <div className="dialog-note">
+                平台已备好带项目扫描事实的需求包。生成由你的 AI 编程助手在外部执行（平台冻结决策：不在平台内调模型产代码），
+                本页负责把上下文喂足、并在它完成后验收。
               </div>
-              <pre className="adapter-guide-prompt">{adapterPrompt}</pre>
-              <button onClick={() => void copyPrompt()}>复制需求提示词</button>
-              {copied && <span className="ok-inline"> 已复制</span>}
+              {!launchOpen ? (
+                <button className="primary" onClick={() => { setLaunchOpen(true); void copyPrompt() }}>
+                  开始生成适配层（复制需求包给 AI 助手）
+                </button>
+              ) : (
+                <div className="adapter-handoff">
+                  <ol>
+                    <li>需求包已复制到剪贴板——粘贴给你的 AI 编程助手（ZCode / Cursor 等）执行；<button className="import-recent-item" onClick={() => void copyPrompt()}>再次复制</button>{copied && <span className="ok-inline"> 已复制</span>}</li>
+                    <li>它会按 skills/onboarding-skill 产出适配层，并把门面登记进 GameRegistry（gameId 已绑定本项目）。</li>
+                    <li>完成后重新构建（<code>dotnet build LevelForge_glm/LevelForge.slnx</code>）并<b>重启平台</b>。</li>
+                    <li>回到本页点下方「验证适配层」运行门1——全绿后即可在④⑤⑥完成验收与转正。</li>
+                  </ol>
+                  <details>
+                    <summary className="import-recent-item" style={{ display: 'inline-block' }}>查看需求包全文</summary>
+                    <pre className="adapter-guide-prompt">{adapterPrompt}</pre>
+                  </details>
+                </div>
+              )}
             </div>
-          )}
-          {/* 产物验收只在适配层产出后有实体可查——未接入时显示"待产出"而不是占位符打分 */}
-          {game.adapterReady ? (
+          ) : (
             <>
+              <div className="ok-message">适配层已接入 ✓ ——下面逐项验收产物，然后运行门1。</div>
               <ul className="artifact-list">
                 {artifacts.map((a) => (
                   <li key={a.name} className={a.ok ? 'ok' : 'missing'}>
@@ -475,10 +507,8 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
                 ))}
               </ul>
               <ImportPanel gameId={game.gameId} defaultDirectory={detail.levelsRoot} />
-              <button onClick={() => void submitGate1()}>运行门1（五项合规检查）</button>
+              <button className="primary" onClick={() => void submitGate1()}>验证适配层（运行门1 五项合规检查）</button>
             </>
-          ) : (
-            <div className="ob-note">五件接入产物（视觉映射/机制表/规则书/格式说明书/规则矩阵）将在适配层产出后在此逐项验收——现在还没有东西可验收。</div>
           )}
           {gate1 && (
             <div className="gate1-cards">
@@ -507,16 +537,20 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
           )}
         </section>
 
-        {/* ④审核清单：模板种子 + 画像派生条目，可增删，按玩法持久化 */}
+        {/* ④审核清单：模板种子 + 画像派生条目，可增删，按玩法持久化；适配层就绪后解锁 */}
         <section className={`ob-step ${statusOf(4) === 'done' ? 'step-done' : ''}`}>
           <h4>{stepTitle(4)} <span className={chip(statusOf(4))}>{statusOf(4)}</span></h4>
+          {!verifyUnlocked ? (
+            <div className="ob-locked">🔒 本步验收的是适配层实现——完成③（适配层产出并通过门1）后解锁。</div>
+          ) : (
+          <>
           <div className="ob-note">
-            清单 = 通用模板 + 本项目扫描派生条目（<span className="ok-inline">带标记</span>）。可直接增删条目；
+            清单 = 通用模板 + 本项目扫描派生条目（<span className="ok-inline">◆</span>）。可直接增删条目；
             语义歧义必须转用例，禁止直接勾选。
           </div>
-          <div className="checklist">
+          <div className="cl-list">
             {items.map((item) => (
-              <label key={item.index}>
+              <label key={item.index} className="cl-item">
                 <input
                   type="checkbox"
                   checked={checked.includes(item.index)}
@@ -524,16 +558,9 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
                     setChecked((prev) => (e.target.checked ? [...prev, item.index] : prev.filter((i) => i !== item.index)))
                   }
                 />
-                <span className="group-chip">{item.group}</span> {item.index}. {item.text}
-                {item.custom && <span className="ok-inline"> ◆项目派生</span>}
-                <button
-                  className="import-recent-item"
-                  style={{ marginLeft: 8 }}
-                  onClick={() => removeChecklistItem(item.index)}
-                  title="删除该条"
-                >
-                  删除
-                </button>
+                <span className="group-chip">{item.group}</span>
+                <span className="cl-text">{item.index}. {item.text}{item.custom && <span className="cl-badge"> ◆项目派生</span>}</span>
+                <button className="cl-del" onClick={() => removeChecklistItem(item.index)} title="删除该条">删除</button>
               </label>
             ))}
           </div>
@@ -554,11 +581,17 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
               仅保存清单（不完成）
             </button>
           </div>
+          </>
+          )}
         </section>
 
-        {/* ⑤门2分诊 */}
+        {/* ⑤门2分诊：适配层就绪后解锁 */}
         <section className={`ob-step ${statusOf(5) === 'done' ? 'step-done' : ''}`}>
           <h4>{stepTitle(5)} <span className={chip(statusOf(5))}>{statusOf(5)}</span></h4>
+          {!verifyUnlocked ? (
+            <div className="ob-locked">🔒 本步处理适配层对拍分诊——完成③后解锁。</div>
+          ) : (
+          <>
           {!game.gate2Applicable ? (
             <>
               <div className="ob-note">门2对该玩法<b>不适用</b>（①步已登记）——基准预期由人工确认，执行确认走人工降级。</div>
@@ -571,11 +604,17 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
             </div>
           )}
           <button onClick={() => void submitGate2()}>确认本步</button>
+          </>
+          )}
         </section>
 
-        {/* ⑥门3 + 上线 */}
+        {/* ⑥门3 + 上线：适配层就绪后解锁 */}
         <section className={`ob-step ${statusOf(6) === 'done' ? 'step-done' : ''}`}>
           <h4>{stepTitle(6)} <span className={chip(statusOf(6))}>{statusOf(6)}</span></h4>
+          {!verifyUnlocked ? (
+            <div className="ob-locked">🔒 本步跑基准 diff 与上线——完成③后解锁。</div>
+          ) : (
+          <>
           <div className="ob-form-row">
             <button onClick={() => void submitGate3()}>运行门3（基准 diff）</button>
             {game.status !== 'trial' && game.status !== 'production' && (
@@ -628,6 +667,8 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
                 </div>
               ))}
             </details>
+          )}
+          </>
           )}
         </section>
       </div>
