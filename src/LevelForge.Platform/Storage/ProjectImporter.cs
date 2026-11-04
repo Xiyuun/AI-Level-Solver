@@ -50,13 +50,28 @@ public sealed class ProjectImporter(GameStore games, AppDatabase db, SettingsSto
                 $"目录名「{displayName}」与已导入项目「{existing.Id}」（{existing.DisplayName}）撞名：请重命名项目目录后重新导入");
         }
 
-        if (!games.InsertImportedGame(gameId, displayName, engine, root))
+        // 项目扫描（三轮 N12 完整版）：关卡目录候选 + 抽样解析 + 机器观察——向导全部内容的数据源
+        var profile = ProjectScanner.Scan(root, engine);
+        if (!games.InsertImportedGame(gameId, displayName, engine, root, ProjectScanner.ToJson(profile)))
         {
             throw new ProjectImportException($"导入落库失败：{gameId}");
         }
         GameSeeder.SeedOnboardingTasks(db, gameId, production: false);
         TouchRecent(root);
         return new ProjectImportOutcome(gameId, displayName, engine, root, AlreadyImported: false);
+    }
+
+    // 重新扫描：项目内容可能已变化（关卡目录移动/新增）——用现有 games 行的根目录与引擎重跑扫描并回写画像
+    public ProjectProfile Rescan(string gameId)
+    {
+        var game = games.FindGame(gameId) ?? throw new ProjectImportException($"未知玩法：{gameId}");
+        if (string.IsNullOrWhiteSpace(game.ProjectRoot))
+        {
+            throw new ProjectImportException("该玩法不是导入的项目（无项目根目录），无法扫描");
+        }
+        var profile = ProjectScanner.Scan(game.ProjectRoot, game.EngineType ?? "unknown");
+        games.UpdateProfile(gameId, ProjectScanner.ToJson(profile));
+        return profile;
     }
 
     // 最近导入目录（前端快捷回填）

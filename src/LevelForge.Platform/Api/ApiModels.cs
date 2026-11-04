@@ -13,6 +13,7 @@ public sealed record GameSummaryDto(
     bool AdapterReady, string? EngineType);
 
 // 玩法详情：接入产物全量（视觉映射/机制表/难度权重为解析后的 JSON 对象）
+// ProjectProfile：导入项目的扫描画像（关卡目录候选/抽样文件/机器观察；静态注册玩法为 null）
 public sealed record GameDetailDto(
     string GameId, string DisplayName, string Status, string StatusName,
     string AdapterVer, string AdapterHash, string KernelVer, string ContractVer,
@@ -20,7 +21,7 @@ public sealed record GameDetailDto(
     JsonNode? VisualMapping, JsonNode? Mechanics, JsonNode? DifficultyWeights,
     string GameBrief, string FormatSpec, string RuleMatrix,
     string RegisteredAt, string UpdatedAt,
-    bool AdapterReady, string? EngineType, string? ProjectRoot);
+    bool AdapterReady, string? EngineType, string? ProjectRoot, JsonNode? ProjectProfile);
 
 // 当前活跃玩法
 public sealed record ActiveGameDto(string GameId);
@@ -215,3 +216,9 @@ public sealed record ProjectImportRequestDto(string? Directory);
 // 导入结论：gameId 由目录名 slug 化；AlreadyImported=true 表示同目录重复导入（幂等）
 public sealed record ProjectImportResultDto(
     string GameId, string DisplayName, string EngineType, string ProjectRoot, bool AlreadyImported);
+
+// 重新扫描结论（向导里"项目内容变了"时触发；画像全文随玩法详情下发）
+public sealed record ProjectRescanResultDto(string GameId, string EngineType, string ProjectRoot);
+
+// 关卡根目录确认请求（向导①：用户从扫描候选中选定）
+public sealed record LevelsRootRequestDto(string? LevelsRoot);

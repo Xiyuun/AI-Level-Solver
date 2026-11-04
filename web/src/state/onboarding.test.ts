@@ -1,7 +1,7 @@
 // 接入向导纯逻辑测试：清单完备性 / 六步完成度 / 勾选完成判定
 import { describe, expect, it } from 'vitest'
 import type { OnboardingTask } from '../api/client'
-import { REVIEW_CHECKLIST, allStepsDone, checklistComplete, groupGate3 } from './onboarding'
+import { REVIEW_CHECKLIST, allStepsDone, checklistComplete, groupGate3, seedChecklist } from './onboarding'
 
 function task(step: number, status: string): OnboardingTask {
   return { step, title: `step${step}`, status, detail: null, updatedAt: '' }
@@ -33,10 +33,33 @@ describe('六步完成度', () => {
 })
 
 describe('清单勾选完成', () => {
-  it('13 条全勾才完成；缺一条不行', () => {
+  it('全部条目勾完才完成；缺一条不行', () => {
     const all = Array.from({ length: 13 }, (_, i) => i + 1)
-    expect(checklistComplete(all)).toBe(true)
-    expect(checklistComplete(all.slice(0, 12))).toBe(false)
+    expect(checklistComplete(all, REVIEW_CHECKLIST)).toBe(true)
+    expect(checklistComplete(all.slice(0, 12), REVIEW_CHECKLIST)).toBe(false)
+  })
+})
+
+describe('按项目画像生成清单初稿', () => {
+  it('无画像 = 纯模板', () => {
+    expect(seedChecklist(null).every((i) => !i.custom)).toBe(true)
+  })
+  it('有画像 = 模板 + 项目派生条目（关卡目录/抽样键/引擎特有）', () => {
+    const profile = {
+      scannedAt: '2026-11-04T00:00:00Z',
+      projectRoot: 'E:/proj',
+      engine: 'cocos-creator3',
+      levelDirCandidates: [{ directory: 'assets/levels', jsonCount: 64, namingHint: 'numbered' }],
+      sampleFiles: [{ path: 'assets/levels/1.json', bytes: 320, parsed: true, topLevelKeys: 'levelId,grid', parseError: null }],
+      observations: [],
+    }
+    const items = seedChecklist(profile as never)
+    const customs = items.filter((i) => i.custom)
+    expect(customs.length).toBeGreaterThanOrEqual(3)
+    expect(customs.some((i) => i.text.includes('assets/levels'))).toBe(true)
+    expect(customs.some((i) => i.text.includes('levelId,grid'))).toBe(true)
+    expect(customs.some((i) => i.text.includes('Cocos'))).toBe(true)
+    expect(customs.every((i) => i.index >= 100)).toBe(true)
   })
 })
 

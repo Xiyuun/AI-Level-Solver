@@ -27,6 +27,17 @@ export interface GameDetail extends GameSummary {
   formatSpec: string
   ruleMatrix: string
   projectRoot: string | null // 导入项目的根目录（内置玩法为 null）
+  projectProfile: ProjectProfile | null // 导入项目的扫描画像（关卡目录候选/抽样/机器观察）
+}
+
+// 项目扫描画像（三轮 N12：全部是机器可直接验证的事实）
+export interface ProjectProfile {
+  scannedAt: string
+  projectRoot: string
+  engine: string
+  levelDirCandidates: { directory: string; jsonCount: number; namingHint: string }[]
+  sampleFiles: { path: string; bytes: number; parsed: boolean; topLevelKeys: string | null; parseError: string | null }[]
+  observations: string[]
 }
 
 export interface LevelRow {
@@ -225,6 +236,12 @@ export async function importProject(directory: string): Promise<ProjectImportRes
 
 export const recentProjects = () => getJson<string[]>('/api/projects/recent')
 
+// 项目重扫（向导内：项目内容变化后触发）与关卡根目录确认（向导①）
+export const rescanProject = (gameId: string) =>
+  sendJson<{ gameId: string; engineType: string; projectRoot: string }>(`/api/games/${gameId}/rescan`, 'POST')
+export const setLevelsRoot = (gameId: string, levelsRoot: string) =>
+  sendJson<{ levelsRoot: string }>(`/api/games/${gameId}/levels-root`, 'PUT', { levelsRoot })
+
 // 求解与磁带
 export const listLevels = (gameId: string) => getJson<LevelRow[]>(`/api/games/${gameId}/levels`)
 export const solveLevel = (gameId: string, levelId: string) =>
@@ -393,6 +410,11 @@ export const setGameStatus = (gameId: string, status: string) =>
 export const setGate2Driver = (gameId: string, command: string, args: string[], timeoutSeconds?: number) =>
   sendJson<{ message: string; applicable: boolean }>(`/api/games/${gameId}/gate2-driver`, 'POST', {
     command, args, timeoutSeconds,
+  })
+// 登记"门2不适用"（无需驱动命令；导入项目的确认态，三轮 N11）
+export const setGate2NotApplicable = (gameId: string) =>
+  sendJson<{ message: string; applicable: boolean }>(`/api/games/${gameId}/gate2-driver`, 'POST', {
+    applicable: false,
   })
 
 // LLM 测试连接（可带待验证配置，未保存先测）

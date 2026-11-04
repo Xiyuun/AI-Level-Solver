@@ -35,5 +35,39 @@ public static class ProjectEndpoints
         // 最近导入目录（前端快捷回填）
         app.MapGet("/api/projects/recent", (ProjectImporter importer) =>
             Results.Ok(importer.RecentDirectories()));
+
+        // 重新扫描（向导内"项目内容变了"时触发；画像全文随玩法详情下发）
+        app.MapPost("/api/games/{gameId}/rescan", (string gameId, ProjectImporter importer, GameStore games) =>
+        {
+            if (games.FindGame(gameId) is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            try
+            {
+                var profile = importer.Rescan(gameId);
+                return Results.Ok(new ProjectRescanResultDto(gameId, profile.Engine, profile.ProjectRoot));
+            }
+            catch (ProjectImportException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        // 关卡根目录确认（向导①：用户从扫描候选中选定后回填）
+        app.MapPut("/api/games/{gameId}/levels-root", (string gameId, LevelsRootRequestDto body, GameStore games) =>
+        {
+            if (games.FindGame(gameId) is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            if (string.IsNullOrWhiteSpace(body.LevelsRoot))
+            {
+                return Results.BadRequest(new { message = "缺少 levelsRoot" });
+            }
+            return games.UpdateLevelsRoot(gameId, body.LevelsRoot.Trim())
+                ? Results.Ok(new { levelsRoot = body.LevelsRoot.Trim() })
+                : Results.NotFound(new { message = $"未知玩法：{gameId}" });
+        });
     }
 }

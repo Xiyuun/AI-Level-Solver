@@ -73,12 +73,28 @@ public static class OnboardingEndpoints
         });
 
         // 门2驱动配置登记（接入产物⑦；向导①登记表单落库，替代手工 SQL）
+        // applicable=false 时允许不带命令——那是"确认门2不适用"的登记（导入项目的默认态，三轮 N11）
         app.MapPost("/api/games/{gameId}/gate2-driver", (
             string gameId, Gate2DriverRequestDto body, OnboardingStore onboarding) =>
         {
-            if (string.IsNullOrWhiteSpace(body.Command) || body.Args is null || body.Args.Count == 0)
+            var confirmingNotApplicable = body.Applicable == false;
+            if (!confirmingNotApplicable &&
+                (string.IsNullOrWhiteSpace(body.Command) || body.Args is null || body.Args.Count == 0))
             {
-                return Results.BadRequest(new { message = "驱动配置需要 command 与非空 args" });
+                return Results.BadRequest(new { message = "驱动配置需要 command 与非空 args（若门2不适用请显式传 applicable=false）" });
+            }
+            if (confirmingNotApplicable)
+            {
+                if (!onboarding.UpdateGate2Driver(gameId, JsonSerializer.Serialize(new
+                {
+                    command = "",
+                    args = Array.Empty<string>(),
+                    timeoutSeconds = body.TimeoutSeconds ?? 180
+                }, LevelForge.Kernel.Replay.TapeJson.Options), applicable: false))
+                {
+                    return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+                }
+                return Results.Ok(new { message = "已登记：门2不适用", applicable = false });
             }
             try
             {

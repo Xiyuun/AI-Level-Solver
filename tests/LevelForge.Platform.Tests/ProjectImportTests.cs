@@ -232,4 +232,107 @@ public sealed class ProjectImportTests
     }
 
     #endregion
+
+    #region 项目扫描与画像（三轮 N12：向导内容的数据源）
+
+    // 建一个带关卡目录的假 Cocos 项目：assets/levels/ 下 5 个数字命名的 JSON 关卡
+    private static string MakeCocosWithLevels(string root)
+    {
+        MakeCocosProject(root);
+        var levels = Path.Combine(root, "assets", "levels");
+        Directory.CreateDirectory(levels);
+        for (var i = 1; i <= 5; i++)
+        {
+            File.WriteAllText(Path.Combine(levels, i + ".json"),
+                $$"""{"levelId":{{i}},"name":"level {{i}}","pigs":[1,2,3]}""");
+        }
+        Directory.CreateDirectory(Path.Combine(root, "assets", "scripts"));
+        return root;
+    }
+
+    [Fact]
+    public void 扫描器_关卡目录候选与样例解析()
+    {
+        var root = MakeCocosWithLevels(Path.Combine(Path.GetTempPath(), "lf-scan-" + Guid.NewGuid().ToString("N")));
+        try
+        {
+            var profile = ProjectScanner.Scan(root, "cocos-creator3");
+            Assert.Equal("cocos-creator3", profile.Engine);
+            var top = profile.LevelDirCandidates.FirstOrDefault();
+            Assert.NotNull(top);
+            Assert.Equal("assets/levels", top!.Directory);
+            Assert.Equal(5, top.JsonCount);
+            Assert.Equal("numbered", top.NamingHint);
+            var parsed = profile.SampleFiles.Where(f => f.Parsed).ToList();
+            Assert.NotEmpty(parsed);
+            Assert.Contains("levelId", parsed[0].TopLevelKeys);
+            Assert.All(profile.Observations, o => Assert.False(string.IsNullOrWhiteSpace(o)));
+            var round = ProjectScanner.FromJson(ProjectScanner.ToJson(profile));
+            Assert.NotNull(round);
+            Assert.Equal(profile.LevelDirCandidates.Count, round!.LevelDirCandidates.Count);
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task 导入即扫描_详情带画像_重扫与根目录回填生效()
+    {
+        var projectDir = MakeCocosWithLevels(Path.Combine(Path.GetTempPath(), "lf-prof-" + Guid.NewGuid().ToString("N")));
+        using var factory = new PlatformFactory();
+        var client = factory.CreateClient();
+        try
+        {
+            var import = await PostJsonAsync(client, "/api/projects/import", new { directory = projectDir });
+            Assert.Equal(HttpStatusCode.OK, import.StatusCode);
+            var result = JsonSerializer.Deserialize<Api.ProjectImportResultDto>(await import.Content.ReadAsStringAsync(), Json)!;
+
+            var detail = JsonSerializer.Deserialize<Api.GameDetailDto>(
+                await client.GetStringAsync($"/api/games/{result.GameId}"), Json)!;
+            Assert.NotNull(detail.ProjectProfile);
+            Assert.Contains("assets/levels", detail.ProjectProfile!.ToJsonString());
+
+            var rescan = await PostJsonAsync(client, $"/api/games/{result.GameId}/rescan", new { });
+            Assert.Equal(HttpStatusCode.OK, rescan.StatusCode);
+
+            var put = await client.PutAsync($"/api/games/{result.GameId}/levels-root",
+                new StringContent(JsonSerializer.Serialize(new { levelsRoot = "assets/levels" }, Json), Encoding.UTF8, "application/json"));
+            Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+            var detail2 = JsonSerializer.Deserialize<Api.GameDetailDto>(
+                await client.GetStringAsync($"/api/games/{result.GameId}"), Json)!;
+            Assert.Equal("assets/levels", detail2.LevelsRoot);
+        }
+        finally
+        {
+            try { Directory.Delete(projectDir, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task 门2不适用登记_无驱动命令可完成()
+    {
+        var projectDir = MakeUnityProject(Path.Combine(Path.GetTempPath(), "lf-g2-" + Guid.NewGuid().ToString("N")));
+        using var factory = new PlatformFactory();
+        var client = factory.CreateClient();
+        try
+        {
+            var import = await PostJsonAsync(client, "/api/projects/import", new { directory = projectDir });
+            var result = JsonSerializer.Deserialize<Api.ProjectImportResultDto>(await import.Content.ReadAsStringAsync(), Json)!;
+
+            var resp = await PostJsonAsync(client, $"/api/games/{result.GameId}/gate2-driver", new { applicable = false });
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+            Assert.Contains("\"applicable\":false", await resp.Content.ReadAsStringAsync());
+
+            var bad = await PostJsonAsync(client, $"/api/games/{result.GameId}/gate2-driver", new { applicable = true });
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        }
+        finally
+        {
+            try { Directory.Delete(projectDir, true); } catch (IOException) { }
+        }
+    }
+
+    #endregion
 }

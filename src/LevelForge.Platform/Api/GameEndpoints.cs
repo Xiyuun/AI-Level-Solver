@@ -19,7 +19,7 @@ public static class GameEndpoints
             return Results.Ok(list);
         });
 
-        // 玩法详情：接入产物全量
+        // 玩法详情：接入产物全量 + 扫描画像（导入项目）
         app.MapGet("/api/games/{gameId}", (string gameId, GameStore games, GameRegistry registry) =>
         {
             var g = games.FindGame(gameId);
@@ -30,7 +30,8 @@ public static class GameEndpoints
                 g.LevelsRoot, g.Gate2Applicable, g.LevelCount,
                 ParseJson(g.VisualMappingJson), ParseJson(g.MechanicsJson), ParseJson(g.DifficultyWeightsJson),
                 g.GameBrief, g.FormatSpec, g.RuleMatrix, g.RegisteredAt, g.UpdatedAt,
-                registry.TryGet(g.Id, out _), g.EngineType, g.ProjectRoot));
+                registry.TryGet(g.Id, out _), g.EngineType, g.ProjectRoot,
+                g.ProjectProfileJson is null ? null : ParseJson(g.ProjectProfileJson)));
         });
 
         // 当前活跃玩法

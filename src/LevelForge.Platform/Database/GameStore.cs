@@ -4,6 +4,7 @@ namespace LevelForge.Platform.Database;
 
 // 玩法行：games 表整行 + 关卡数（列表页一次查询带回）
 // ProjectRoot/EngineType：仅导入的项目有值（静态注册玩法为 NULL，见 AppDatabase Migrate v2）
+// ProjectProfileJson：导入项目的扫描画像快照（v3，ProjectScanner 产出）
 public sealed record GameRow(
     string Id, string DisplayName, string Status,
     string AdapterVer, string AdapterHash, string KernelVer, string ContractVer,
@@ -11,7 +12,7 @@ public sealed record GameRow(
     string VisualMappingJson, string MechanicsJson, string GameBrief, string FormatSpec,
     string RuleMatrix, string DifficultyWeightsJson,
     string? Gate2DriverJson,
-    string? ProjectRoot, string? EngineType,
+    string? ProjectRoot, string? EngineType, string? ProjectProfileJson,
     string RegisteredAt, string UpdatedAt, long LevelCount);
 
 // 关卡行：levels 表整行
@@ -89,23 +90,24 @@ public sealed class GameStore
             reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6));
     }
 
-    // 导入项目落库：占位行（接入产物在适配层完成后由种子注册对齐）。
+    // 导入项目落库：占位行 + 扫描画像（接入产物在适配层完成后由种子注册对齐）。
     // gameId 已存在返回 false（调用方转为"已导入/撞名"语义）
-    public bool InsertImportedGame(string gameId, string displayName, string engineType, string projectRoot)
+    public bool InsertImportedGame(string gameId, string displayName, string engineType, string projectRoot, string profileJson)
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO games (id, display_name, status, adapter_ver, adapter_hash, kernel_ver, contract_ver,
               levels_root, gate2_applicable, visual_mapping_json, mechanics_json, game_brief, format_spec,
-              rule_matrix, difficulty_weights_json, project_root, engine_type, registered_at, updated_at)
+              rule_matrix, difficulty_weights_json, project_root, engine_type, project_profile_json, registered_at, updated_at)
             VALUES ($id, $name, 'onboarding', '0.0.0', '', '0.0.0', '-',
-              '', 0, '{}', '{}', '', '', '', '{}', $root, $engine, $now, $now)
+              '', 0, '{}', '{}', '', '', '', '{}', $root, $engine, $profile, $now, $now)
             """;
         cmd.Parameters.AddWithValue("$id", gameId);
         cmd.Parameters.AddWithValue("$name", displayName);
         cmd.Parameters.AddWithValue("$root", projectRoot);
         cmd.Parameters.AddWithValue("$engine", engineType);
+        cmd.Parameters.AddWithValue("$profile", profileJson);
         cmd.Parameters.AddWithValue("$now", AppDatabase.UtcNowIso);
         try
         {
@@ -115,6 +117,30 @@ public sealed class GameStore
         {
             return false;
         }
+    }
+
+    // 更新关卡根目录（向导①用户从扫描候选中确认后回填）
+    public bool UpdateLevelsRoot(string gameId, string levelsRoot)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE games SET levels_root = $root, updated_at = $now WHERE id = $id";
+        cmd.Parameters.AddWithValue("$root", levelsRoot);
+        cmd.Parameters.AddWithValue("$now", AppDatabase.UtcNowIso);
+        cmd.Parameters.AddWithValue("$id", gameId);
+        return cmd.ExecuteNonQuery() == 1;
+    }
+
+    // 更新扫描画像快照（重新扫描）
+    public bool UpdateProfile(string gameId, string profileJson)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE games SET project_profile_json = $profile, updated_at = $now WHERE id = $id";
+        cmd.Parameters.AddWithValue("$profile", profileJson);
+        cmd.Parameters.AddWithValue("$now", AppDatabase.UtcNowIso);
+        cmd.Parameters.AddWithValue("$id", gameId);
+        return cmd.ExecuteNonQuery() == 1;
     }
 
     // 关卡登记 upsert：安全落盘成功后调用（同编号覆盖内容与哈希；来源随调用方）
@@ -165,6 +191,7 @@ public sealed class GameStore
                 reader.IsDBNull(reader.GetOrdinal("gate2_driver_json")) ? null : reader.GetString(reader.GetOrdinal("gate2_driver_json")),
                 reader.IsDBNull(reader.GetOrdinal("project_root")) ? null : reader.GetString(reader.GetOrdinal("project_root")),
                 reader.IsDBNull(reader.GetOrdinal("engine_type")) ? null : reader.GetString(reader.GetOrdinal("engine_type")),
+                reader.IsDBNull(reader.GetOrdinal("project_profile_json")) ? null : reader.GetString(reader.GetOrdinal("project_profile_json")),
                 reader.GetString(reader.GetOrdinal("registered_at")),
                 reader.GetString(reader.GetOrdinal("updated_at")),
                 reader.GetInt64(reader.GetOrdinal("level_count"))));

@@ -64,8 +64,17 @@ public sealed class AppDatabase
             m.ExecuteNonQuery();
         }
 
+        if (current < 3)
+        {
+            // v3（三轮 N12 向导项目化）：导入项目的扫描画像（关卡目录候选/抽样文件/机器观察）。
+            // JSON 快照存 games 行；静态注册玩法为 NULL
+            using var m = conn.CreateCommand();
+            m.CommandText = "ALTER TABLE games ADD COLUMN project_profile_json TEXT;";
+            m.ExecuteNonQuery();
+        }
+
         using var set = conn.CreateCommand();
-        set.CommandText = "PRAGMA user_version=2";
+        set.CommandText = "PRAGMA user_version=3";
         set.ExecuteNonQuery();
     }
 
