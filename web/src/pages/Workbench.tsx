@@ -2,12 +2,15 @@
 // 状态机（§3）：空态→生成中（可取消）→成功态（回放⇄试玩）/失败态（自动应用建议重试一次，可还原）
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  generate,
+  cancelGenerationJob,
   getSettings,
   getTapeJson,
   solvePasted,
+  startGenerationJob,
+  subscribeGenerationJob,
   type GameDetail,
   type GameSummary,
+  type GenerationEvent,
   type GenerationRun,
   type SolveResponse,
 } from '../api/client'
@@ -19,7 +22,16 @@ import { MetricsBar } from '../components/MetricsBar'
 import { PhrasePicker } from '../components/PhrasePicker'
 import { PipelineLog } from '../components/PipelineLog'
 import { PreviewPane } from '../components/PreviewPane'
-import { logEntriesFromRun, mechanicsHint, nextPhase, suggestionsFrom, type Phase } from '../state/workbench'
+import {
+  logEntriesFromEvents,
+  logEntriesFromRun,
+  mechanicsHint,
+  nextPhase,
+  progressFootnote,
+  progressHeadline,
+  suggestionsFrom,
+  type Phase,
+} from '../state/workbench'
 
 // 表单值 + "由系统调整"标记（失败自动重试时被调字段高亮，可一键还原 §5）
 interface FormState {
@@ -56,7 +68,12 @@ export function Workbench({ game, detail }: { game: GameSummary; detail: GameDet
   const [adoptTarget, setAdoptTarget] = useState<AdoptTarget | null>(null)
   const [adoptedLevelId, setAdoptedLevelId] = useState<string | null>(null)
   const [confirmRefresh, setConfirmRefresh] = useState(0)
-  const abortRef = useRef<AbortController | null>(null)
+  // 异步任务进度（SSE）：事件逐条累积，终态时替换为完整事件列表
+  const [liveEvents, setLiveEvents] = useState<GenerationEvent[]>([])
+  const [jobId, setJobId] = useState<number | null>(null)
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const cleanupRef = useRef<(() => void) | null>(null)
+  const timerRef = useRef<number | null>(null)
 
   const mapping = detail.visualMapping as VisualMapping
 
@@ -82,76 +99,126 @@ export function Workbench({ game, detail }: { game: GameSummary; detail: GameDet
   }, [selectedCandidate])
 
   const mechHint = useMemo(() => mechanicsHint(detail.mechanics, form.levelNumber), [detail.mechanics, form.levelNumber])
-  const logEntries = useMemo(() => (run ? logEntriesFromRun(run) : []), [run])
+  // 生成中显示实时事件流，终态显示运行记录的完整日志（两条路径共用同一套角色与文案）
+  const logEntries = useMemo(() => {
+    if (phase === 'generating') return logEntriesFromEvents(liveEvents)
+    return run ? logEntriesFromRun(run) : []
+  }, [phase, liveEvents, run])
   const adoptedCandidate = run?.candidates.find((c) => c.attemptIndex === run.adoptedAttempt) ?? null
 
-  // ---- 生成主流程（含失败自动应用建议重试一次，§5 设计决定 #4）----
+  // 终态处理：成功/失败/取消三路（失败可触发一次自动重试）
+  const applyRunResult = useCallback(
+    (result: GenerationRun, params: FormState) => {
+      setRun(result)
+      setSelectedAttempt(result.adoptedAttempt ?? result.candidates[0]?.attemptIndex ?? 1)
+      if (result.status === 'succeeded') {
+        setPhase(nextPhase('generating', 'succeed'))
+        return
+      }
+      if (result.status === 'failed') {
+        // 失败即自动应用建议直接重试（仅一次；被调字段高亮，可还原）
+        const suggestions = suggestionsFrom(result)
+        if (suggestions && !autoRetried) {
+          setOriginalForm(params)
+          const adjusted: FormState = {
+            ...params,
+            targetDifficulty: suggestions.targetDifficulty ?? params.targetDifficulty,
+            solveTimeoutMs: suggestions.solveTimeoutMs ?? params.solveTimeoutMs,
+            candidateLimit: suggestions.candidateLimit ?? params.candidateLimit,
+            specialRequirements: suggestions.specialRequirements !== undefined ? suggestions.specialRequirements : params.specialRequirements,
+          }
+          const adjustedFields = Object.keys(suggestions).filter((k) => k !== 'reasons' && suggestions[k as keyof typeof suggestions] !== undefined)
+          setForm({ ...adjusted, adjustedFields })
+          setAutoRetryReasons(suggestions.reasons)
+          setAutoRetried(true)
+          void runGenerateRef.current?.(adjusted)
+        } else {
+          setPhase(nextPhase('generating', 'exhaust'))
+        }
+        return
+      }
+      setPhase(nextPhase('generating', 'cancel'))   // cancelled
+    },
+    [autoRetried],
+  )
+
+  // ---- 生成主流程（异步任务 + SSE 实时进度；含失败自动应用建议重试一次，§5 设计决定 #4）----
   const runGenerate = useCallback(
     async (params: FormState) => {
-      abortRef.current?.abort()
-      const controller = new AbortController()
-      abortRef.current = controller
+      // 先断开上一次订阅与计时器，避免事件串流
+      cleanupRef.current?.()
+      cleanupRef.current = null
+      if (timerRef.current !== null) window.clearInterval(timerRef.current)
       setPhase(nextPhase('idle', 'start'))
       setMessage('')
+      setLiveEvents([])
+      setElapsedMs(0)
+      setRun(null)
+      setTape(null)
+      const startedAt = Date.now()
+      // 本地计时器：SSE 事件间隔可能很长，至少让"已用时"持续跳动
+      timerRef.current = window.setInterval(() => setElapsedMs(Date.now() - startedAt), 200)
       try {
-        const result = await generate(game.gameId, {
+        const id = await startGenerationJob(game.gameId, {
           targetDifficulty: params.targetDifficulty,
           levelNumber: params.levelNumber.trim() || undefined,
           specialRequirements: params.specialRequirements.trim() || undefined,
           candidateLimit: params.candidateLimit,
           solveTimeoutMs: params.solveTimeoutMs,
-        }, controller.signal)
-        setRun(result)
-        setSelectedAttempt(result.adoptedAttempt ?? result.candidates[0]?.attemptIndex ?? 1)
-        if (result.status === 'succeeded') {
-          setPhase(nextPhase('generating', 'succeed'))
-          return
-        }
-        if (result.status === 'failed') {
-          // 失败即自动应用建议直接重试（仅一次；被调字段高亮，可还原）
-          const suggestions = suggestionsFrom(result)
-          if (suggestions && !autoRetried) {
-            setOriginalForm(params)
-            const adjusted: FormState = {
-              ...params,
-              targetDifficulty: suggestions.targetDifficulty ?? params.targetDifficulty,
-              solveTimeoutMs: suggestions.solveTimeoutMs ?? params.solveTimeoutMs,
-              candidateLimit: suggestions.candidateLimit ?? params.candidateLimit,
-              specialRequirements: suggestions.specialRequirements !== undefined ? suggestions.specialRequirements : params.specialRequirements,
+        })
+        setJobId(id)
+        cleanupRef.current = subscribeGenerationJob(id, {
+          onProgress: (event) => setLiveEvents((prev) => [...prev, event]),
+          onDone: (job) => {
+            if (timerRef.current !== null) window.clearInterval(timerRef.current)
+            cleanupRef.current = null
+            setJobId(null)
+            setLiveEvents(job.events)
+            setElapsedMs(job.elapsedMs)
+            if (job.status === 'cancelled') {
+              setPhase(nextPhase('generating', 'cancel'))
+              return
             }
-            const adjustedFields = Object.keys(suggestions).filter((k) => k !== 'reasons' && suggestions[k as keyof typeof suggestions] !== undefined)
-            setForm({ ...adjusted, adjustedFields })
-            setAutoRetryReasons(suggestions.reasons)
-            setAutoRetried(true)
-            void runGenerateRef.current?.(adjusted)
-          } else {
-            setPhase(nextPhase('generating', 'exhaust'))
-          }
-          return
-        }
-        setPhase('idle') // cancelled
+            if (!job.run) {
+              // 请求校验失败等：没有运行记录，只有原因
+              setMessage(job.error ?? '生成失败：未产生运行记录')
+              setPhase(nextPhase('generating', 'apiError'))
+              return
+            }
+            applyRunResult(job.run, params)
+          },
+          onError: (error) => setMessage(error),
+        })
       } catch (e) {
-        if ((e as Error).name === 'AbortError') {
-          setPhase(nextPhase('generating', 'cancel'))
-          return
-        }
+        if (timerRef.current !== null) window.clearInterval(timerRef.current)
         setMessage((e as Error).message)
         setPhase(nextPhase('generating', 'apiError'))
       }
     },
-    [game.gameId, autoRetried],
+    [game.gameId, applyRunResult],
   )
   const runGenerateRef = useRef<typeof runGenerate | null>(null)
   runGenerateRef.current = runGenerate
 
+  // 取消：请求后端中断（SSE 会以 done/cancelled 收尾）
   const cancelGenerate = () => {
-    abortRef.current?.abort()
+    if (jobId !== null) {
+      void cancelGenerationJob(jobId).catch(() => undefined)
+    }
   }
+
+  // 卸载清理：断开 SSE 与计时器
+  useEffect(() => () => {
+    cleanupRef.current?.()
+    if (timerRef.current !== null) window.clearInterval(timerRef.current)
+  }, [])
 
   const resetAll = () => {
     setPhase('idle')
     setRun(null)
     setTape(null)
+    setLiveEvents([])
+    setElapsedMs(0)
     setAutoRetried(false)
     setAutoRetryReasons([])
     if (originalForm) {
@@ -353,6 +420,22 @@ export function Workbench({ game, detail }: { game: GameSummary; detail: GameDet
             </div>
           )}
 
+          {phase === 'generating' && (
+            // 生成中：棋盘区不空着——居叠进度层显示当前阶段、已用时、进度计数与取消（全流程优化 §8.4）
+            <div className="gen-panel">
+              <div className="gen-progress-overlay">
+                <div className="gen-progress-text">{progressHeadline(liveEvents)}</div>
+                <div className="gen-progress-bar-track">
+                  <div className="gen-progress-bar-fill" />
+                </div>
+                <div className="gen-progress-sub">
+                  已用时 {(elapsedMs / 1000).toFixed(1)}s · {progressFootnote(liveEvents)}
+                </div>
+                <button className="gen-progress-cancel" onClick={cancelGenerate}>取消生成</button>
+              </div>
+            </div>
+          )}
+
           {phase === 'success' && run && (
             <>
               <MetricsBar run={run} adopted={adoptedCandidate} solutionLength={tape?.steps.length ?? null} />
@@ -410,7 +493,15 @@ export function Workbench({ game, detail }: { game: GameSummary; detail: GameDet
               ) : (
                 <div className="failure-advice">建议：降一档难度、放宽特殊要求、提高候选上限或增加超时后重试。</div>
               )}
-              <ConfirmationCard gameId={game.gameId} levelId={adoptedLevelId} refreshKey={confirmRefresh} />
+            </div>
+          )}
+
+          {/* 失败但未产生运行记录（如未配置 LLM / 发起阶段出错）：只报原因，不渲染确认卡 */}
+          {phase === 'failed' && !run && (
+            <div className="failure-report">
+              <h3>生成失败</h3>
+              <div className="failure-conclusion">{message || '本次未能产生运行记录'}</div>
+              <div className="failure-advice">请检查设置页的 LLM 配置与服务日志后重试。</div>
             </div>
           )}
 

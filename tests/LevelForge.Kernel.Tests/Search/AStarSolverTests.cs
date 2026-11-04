@@ -80,6 +80,21 @@ public class AStarSolverTests
         Assert.Equal(TerminationReason.TimeLimit, result.TerminationReason);
     }
 
+    // 诚实指标防线：平均分支因子必须由真实生成量算出，不得用 0 冒充"统计过"
+    // （曾经 A* 写死 0，导致难度模型把分支特征当成 0 参与评分）
+    [Fact]
+    public void 平均分支因子_由真实后继数算出而非占位0()
+    {
+        var level = new SyntheticLevel(0, 5, new[] { (0, 1), (0, 2), (1, 3), (2, 3), (3, 4), (4, 5) });
+        var bundle = SyntheticGraphAdapter.CreateBundle();
+        var result = AStar.Solve(bundle, new SolveRequest<SyntheticLevel>(level));
+
+        Assert.NotNull(result.Metrics);
+        Assert.True(result.Metrics!.StatesExplored > 0);
+        Assert.True(result.Metrics.AvgBranchingFactor > 0,
+            $"平均分支因子应为正数，实际 {result.Metrics.AvgBranchingFactor}");
+    }
+
     [Fact]
     public void 未声明启发式_明确拒绝()
     {

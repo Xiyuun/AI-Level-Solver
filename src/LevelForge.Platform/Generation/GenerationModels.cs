@@ -27,6 +27,14 @@ public sealed record GenerationRequest(
     int? CandidateLimit = null,
     long? SolveTimeoutMs = null);
 
+// 流水线进度（前后端全流程优化 §8.4）：推给 SSE 与前端进度层的最小事实
+// Stage 取值与流水线日志角色一致：llm / solver / difficulty / constraint / integration
+public sealed record GenerationProgress(
+    string Stage,                 // 阶段标识（前端按角色着色）
+    string Message,               // 一句人话
+    int? AttemptIndex = null,     // 第几次候选（1 起）
+    string? FailureClass = null); // 失败分类（有失败时）
+
 // 单次尝试的完整记录（响应与落库共用的形状）
 public sealed record CandidateAttempt(
     int AttemptIndex,                    // 第几次尝试（1 起）

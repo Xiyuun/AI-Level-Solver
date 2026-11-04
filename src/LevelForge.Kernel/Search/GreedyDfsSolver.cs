@@ -92,7 +92,7 @@ public sealed class GreedyDfsSolver<TLevel, TState, TMove> : ISearchStrategy<TLe
         if (game.IsGoal(initialState))
         {
             return Build(SolveStatus.Solved, TerminationReason.GoalFound, [],
-                Metrics(0, 1, 0, sw, 0), null, sw, Optimality.UnitCostShortest);   // 初始即目标 = 零步且显然最短
+                Metrics(0, 0, 1, 0, sw, 0), null, sw, Optimality.UnitCostShortest);   // 初始即目标 = 零步且显然最短
         }
         var initialH = Math.Max(0, heuristic.EstimateToGoal(initialState));
         MinHeuristicSeen = initialH;
@@ -141,7 +141,7 @@ public sealed class GreedyDfsSolver<TLevel, TState, TMove> : ISearchStrategy<TLe
             {
                 // 找到任一可解路径：Optimality=NotProven（贪心不证明最短）
                 return Build(SolveStatus.Solved, TerminationReason.GoalFound, path.ToList(),
-                    Metrics(expanded, closed.Count, frontierPeak, sw, path.Count), null, sw, Optimality.NotProven);
+                    Metrics(expanded, generated, closed.Count, frontierPeak, sw, path.Count), null, sw, Optimality.NotProven);
             }
             frames.Push(new Frame(nextState, nextH,
                 OrderedMoves(bundle, heuristic, nextState, game), 0,
@@ -155,14 +155,14 @@ public sealed class GreedyDfsSolver<TLevel, TState, TMove> : ISearchStrategy<TLe
             if (_options.ShuffleBudget is not null)
             {
                 return Build(SolveStatus.ResourceLimit, TerminationReason.NodeLimit, [],
-                    Metrics(expanded, closed.Count, frontierPeak, sw, 0),
+                    Metrics(expanded, generated, closed.Count, frontierPeak, sw, 0),
                     $"腾挪预算（{_options.ShuffleBudget}）内无解——预算受限探索，不构成无解证明", sw);
             }
             sw.Stop();
             return new SolveResult(
                 SolveStatus.UnsolvableProven, Optimality.NotApplicable, true,
                 TerminationReason.FrontierEmpty, MetricsScope.FullReachableGraph,
-                [], Metrics(expanded, closed.Count, frontierPeak, sw, 0), null);
+                [], Metrics(expanded, generated, closed.Count, frontierPeak, sw, 0), null);
         }
         // 预算/取消中止（找不到不等于无解——DFS 非穷尽）
         var (status, reason, message) = abort switch
@@ -171,7 +171,7 @@ public sealed class GreedyDfsSolver<TLevel, TState, TMove> : ISearchStrategy<TLe
             Abort.Node => (SolveStatus.ResourceLimit, TerminationReason.NodeLimit, $"节点预算耗尽（{request.NodeBudget}）"),
             _ => (SolveStatus.ResourceLimit, TerminationReason.TimeLimit, "时间预算耗尽")
         };
-        return Build(status, reason, [], Metrics(expanded, closed.Count, frontierPeak, sw, 0), message, sw);
+        return Build(status, reason, [], Metrics(expanded, generated, closed.Count, frontierPeak, sw, 0), message, sw);
     }
 
     #endregion
@@ -215,10 +215,11 @@ public sealed class GreedyDfsSolver<TLevel, TState, TMove> : ISearchStrategy<TLe
             false, reason, MetricsScope.ExpandedPrefix, solution, metrics, errorMessage);
     }
 
-    // 计数器打包（分支统计在贪心排序下语义不同，置 0）
-    private static SearchMetrics Metrics(long expanded, long unique, long frontierPeak, Stopwatch sw, int solutionLength)
+    // 计数器打包：平均分支 = 累计生成后继数 / 已展开状态数（与 BFS/A* 同一口径；此前置 0 等于对消费者撒谎）
+    private static SearchMetrics Metrics(long expanded, long generated, long unique, long frontierPeak, Stopwatch sw, int solutionLength)
     {
-        return new SearchMetrics(expanded, unique, frontierPeak, sw.ElapsedMilliseconds, solutionLength, 0);
+        var avgBranching = expanded > 0 ? (double)generated / expanded : 0;
+        return new SearchMetrics(expanded, unique, frontierPeak, sw.ElapsedMilliseconds, solutionLength, avgBranching);
     }
 
     #endregion

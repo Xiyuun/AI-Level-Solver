@@ -13,9 +13,13 @@ namespace LevelForge.Platform.Facades;
 // 滑动猪门面：包装 SlidePig 适配层（内部参考实现；规则矩阵见 SlidePigArtifacts）
 // 求解策略用 A*（适配层声明 IHeuristicAdapter：剩余非笼实体数；BFS 实测稠密关组合爆炸，见 PROGRESS 坑表）
 // 关卡数据不入仓库：内置关卡为空，110 关经向导/导入 API 从游戏项目目录原生导入（滑动猪仅内部，方案书 §8 脱敏要求）
-public sealed class SlidePigFacade : IGameFacade
+public sealed class SlidePigFacade : IGameFacade, ITokenBudgetHint
 {
     public const string AdapterVersionValue = "0.1.0";   // 适配层版本（v1 核心子集：75/110 关）
+
+    // token 预算：稠密关单猪序列化约 40 token × 90 头 ≈ 3600，缺省 2048 必然截断（实测全灭原因）
+    // 这里给足 8192 上限；若模型仍写不出合法原生格式，属内容能力问题，由流水线如实报失败
+    public int EstimateLevelTokens(string? levelNumber) => 8192;
 
     // 纯逻辑无状态适配器：单例复用
     private static readonly SlidePigAdapter AdapterInstance = new();

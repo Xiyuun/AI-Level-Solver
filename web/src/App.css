@@ -15,6 +15,31 @@ body { margin: 0; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; color:
 .empty { color: #8a919c; }
 .big-empty { display: flex; align-items: center; justify-content: center; flex: 1; font-size: 15px; padding: 40px; text-align: center; }
 
+/* ---- 生成进度条（棋盘中心居叠，生成完移除） ---- */
+.gen-panel { position: relative; flex: 1; min-height: 320px; display: flex; }
+.gen-progress-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(250,251,252,0.88); z-index: 10; border-radius: 8px;
+}
+.gen-progress-text { font-size: 14px; color: #444a54; margin-bottom: 10px; }
+.gen-progress-bar-track {
+  width: 240px; height: 8px; border-radius: 4px; background: #e4e7eb; overflow: hidden;
+}
+.gen-progress-bar-fill {
+  height: 100%; border-radius: 4px; background: #3f6fb5;
+  animation: gen-progress-indeterminate 1.6s ease-in-out infinite;
+  transition: width 0.4s ease;
+}
+@keyframes gen-progress-indeterminate {
+  0% { margin-left: -40%; width: 40%; }
+  50% { margin-left: 30%; width: 50%; }
+  100% { margin-left: 100%; width: 40%; }
+}
+.gen-progress-sub { font-size: 12px; color: #8a919c; margin-top: 8px; }
+.gen-progress-cancel { margin-top: 14px; font-size: 13px; color: #b3261e; cursor: pointer; background: none; border: 1px solid #e8c1be; border-radius: 6px; padding: 4px 14px; }
+.gen-progress-cancel:hover { background: #fdecea; }
+
 /* ---- 工作台布局 ---- */
 .workbench { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .trial-watermark { background: #fff3d6; color: #7a5b00; padding: 8px 20px; font-size: 14px; border-bottom: 1px solid #f0dfae; }

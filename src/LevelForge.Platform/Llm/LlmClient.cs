@@ -37,6 +37,7 @@ public sealed record LlmConfig(string BaseUrl, string ApiKey, string Model)
 public sealed class LlmClient
 {
     private const int CallTimeoutSeconds = 30;   // 单次调用超时（生成端出题分析 §5）
+    private const int DefaultMaxTokens = 8192;   // 缺省输出上限：稠密玩法单关 JSON 可达数千 token，2048 会必然截断
 
     // 请求体序列化：宽松编码——中文提示词不转义成 \uXXXX（流量可读、日志可断言）
     private static readonly JsonSerializerOptions BodyOptions = new(JsonSerializerDefaults.Web)
@@ -67,9 +68,26 @@ public sealed class LlmClient
     }
 
     // 聊天补全：一次无状态单问单答（生成端形态铁律：无 agent，循环由流水线代码驱动）
+    // jsonMode：声明 response_format=json_object，把"只输出 JSON"从提示词祈祷变成服务端约束；
+    // 服务端不支持该字段时自动去掉重发一次（不因兼容性问题让整轮生成失败）
     public async Task<ChatResult> ChatAsync(
         LlmConfig config, IReadOnlyList<ChatMessage> messages,
-        double temperature = 0.8, int maxTokens = 2048, CancellationToken ct = default)
+        double temperature = 0.8, int maxTokens = DefaultMaxTokens, bool jsonMode = false,
+        CancellationToken ct = default)
+    {
+        var result = await SendAsync(config, messages, temperature, maxTokens, jsonMode, ct);
+        if (jsonMode && !result.Ok && result.Error is { } error
+            && error.StartsWith("HTTP 400", StringComparison.Ordinal))
+        {
+            return await SendAsync(config, messages, temperature, maxTokens, jsonMode: false, ct);
+        }
+        return result;
+    }
+
+    // 单次请求发送：所有失败转为结论返回（用户取消除外）
+    private async Task<ChatResult> SendAsync(
+        LlmConfig config, IReadOnlyList<ChatMessage> messages,
+        double temperature, int maxTokens, bool jsonMode, CancellationToken ct)
     {
         if (!config.IsConfigured)
         {
@@ -78,18 +96,27 @@ public sealed class LlmClient
         var sw = Stopwatch.StartNew();
         try
         {
-            var body = JsonSerializer.Serialize(new
-            {
-                model = config.Model,
-                messages = messages.Select(m => new { role = m.Role, content = m.Content }),
-                temperature,
-                max_tokens = maxTokens,
-                stream = false
-            }, BodyOptions);
+            var messagePayload = messages
+                .Select(m => new { role = m.Role, content = m.Content })
+                .ToArray();
+            // jsonMode 时附加 response_format，否则完全不出现该字段（避免严格服务端拒绝 null）
+            object body = jsonMode
+                ? new
+                {
+                    model = config.Model, messages = messagePayload, temperature,
+                    max_tokens = maxTokens, stream = false,
+                    response_format = new { type = "json_object" }
+                }
+                : new
+                {
+                    model = config.Model, messages = messagePayload, temperature,
+                    max_tokens = maxTokens, stream = false
+                };
+            var payload = JsonSerializer.Serialize(body, BodyOptions);
             using var request = new HttpRequestMessage(
                 HttpMethod.Post, config.BaseUrl.TrimEnd('/') + "/chat/completions")
             {
-                Content = new StringContent(body, Encoding.UTF8, "application/json")
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
             };
             if (!string.IsNullOrWhiteSpace(config.ApiKey))
             {

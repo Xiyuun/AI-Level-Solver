@@ -1,7 +1,16 @@
 // 工作台纯逻辑测试：状态机流转 / 失败建议映射 / 流水线日志 / 机制提示（vitest，无 DOM）
 import { describe, expect, it } from 'vitest'
-import type { CandidateAttempt, GenerationRun } from '../api/client'
-import { logEntriesFromRun, mechanicsHint, nextPhase, suggestionsFrom, candidateLabel } from './workbench'
+import type { CandidateAttempt, GenerationEvent, GenerationRun } from '../api/client'
+import {
+  logEntriesFromRun,
+  logEntriesFromEvents,
+  mechanicsHint,
+  nextPhase,
+  progressFootnote,
+  progressHeadline,
+  suggestionsFrom,
+  candidateLabel,
+} from './workbench'
 
 function candidate(overrides: Partial<CandidateAttempt>): CandidateAttempt {
   return {
@@ -176,5 +185,45 @@ describe('候选结论标签', () => {
     expect(candidateLabel(candidate({ failureClass: 'unsolvable' }))).toBe('模型内无解')
     expect(candidateLabel(candidate({ failureClass: 'resource_limit' }))).toBe('预算耗尽')
     expect(candidateLabel(candidate({ failureClass: 'difficulty_miss' }))).toBe('难度不达标')
+  })
+})
+
+describe('实时进度（SSE 事件流）', () => {
+  const event = (overrides: Partial<GenerationEvent>): GenerationEvent => ({
+    seq: 1,
+    elapsedMs: 0,
+    stage: 'integration',
+    message: '消息',
+    attemptIndex: null,
+    failureClass: null,
+    ...overrides,
+  })
+
+  it('事件映射为对应角色的日志行', () => {
+    const entries = logEntriesFromEvents([
+      event({ stage: 'llm', message: '出题中' }),
+      event({ stage: 'solver', message: '判卷中' }),
+      event({ stage: 'difficulty', message: '评分中' }),
+      event({ stage: 'unknown-stage', message: '其它' }),
+    ])
+    expect(entries.map((e) => e.role)).toEqual(['llm', 'solver', 'difficulty', 'integration'])
+    expect(entries[0].text).toBe('出题中')
+  })
+
+  it('进度主文案取最新事件，无事件时给等待提示', () => {
+    expect(progressHeadline([])).toContain('准备')
+    expect(progressHeadline([event({ message: '第一条' }), event({ message: '最新一条' })])).toBe('最新一条')
+  })
+
+  it('进度副文案统计候选/模型调用/求解次数', () => {
+    const text = progressFootnote([
+      event({ stage: 'llm', attemptIndex: 1 }),
+      event({ stage: 'llm', attemptIndex: 1 }),
+      event({ stage: 'solver', attemptIndex: 1 }),
+      event({ stage: 'llm', attemptIndex: 2 }),
+    ])
+    expect(text).toContain('候选 2 个')
+    expect(text).toContain('模型调用 3 次')
+    expect(text).toContain('求解 1 次')
   })
 })

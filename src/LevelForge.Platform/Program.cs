@@ -27,6 +27,7 @@ builder.Services.AddSingleton<TapeStore>();
 builder.Services.AddSingleton<GenerationStore>();
 builder.Services.AddSingleton<FewShotSelector>();
 builder.Services.AddSingleton<GenerationPipeline>();
+builder.Services.AddSingleton<GenerationJobService>();   // 异步生成任务 + SSE 进度（后台跑，可取消）
 builder.Services.AddSingleton<ILevelFileIO, FileLevelFileIO>();   // 文件 IO 接缝（故障注入测试替换）
 builder.Services.AddSingleton<LevelFileStore>();
 builder.Services.AddSingleton<ConfirmationStore>();

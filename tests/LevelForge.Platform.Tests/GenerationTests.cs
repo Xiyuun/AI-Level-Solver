@@ -320,4 +320,47 @@ public sealed class GenerationTests
         Assert.Null(LlmJson.ExtractJson("抱歉我不会出题"));
         Assert.Null(LlmJson.ExtractJson(""));
     }
+
+    // 坐标制主路径：模型只给坐标，代码拼出合法网格 → 一条 LLM 调用即可命中，不再烧修复重试
+    [Fact]
+    public async Task 坐标制出题_单次调用即拼装成合法关卡并判卷通过()
+    {
+        const string coord = """{"width":6,"height":4,"player":{"x":1,"y":1},"boxes":[{"x":2,"y":1}],"goals":[{"x":4,"y":1}]}""";
+        var llm = new ScriptedLlm((200, coord));
+        using var factory = CreateFactory(llm);
+        var client = factory.CreateClient();
+        await ConfigureLlmAsync(client);
+
+        var run = await GenerateOkAsync(client, new { gameId = "sokoban-toy", targetDifficulty = 1, levelNumber = "3" });
+
+        Assert.Equal("succeeded", run.Status);
+        Assert.Single(run.Candidates);
+        // 只调用一次：坐标制下"格式错误"从概率问题变成确定性问题，不该需要修复重试
+        Assert.Equal(1, run.Candidates[0].LlmCalls);
+        // 落库内容是拼装后的原生关卡（可直接采纳），不是坐标中间表示
+        var stored = run.Candidates[0].ContentJson!;
+        Assert.Contains("\"grid\"", stored);
+        Assert.DoesNotContain("\"boxes\"", stored);
+    }
+
+    // 提示词一致性：few-shot 示例必须是坐标制，否则模型照示例写原生 grid，坐标制等于白做
+    [Fact]
+    public async Task 坐标制出题_提示词里的示例与要求格式一致()
+    {
+        const string coord = """{"width":6,"height":4,"player":{"x":1,"y":1},"boxes":[{"x":2,"y":1}],"goals":[{"x":4,"y":1}]}""";
+        var llm = new ScriptedLlm((200, coord));
+        using var factory = CreateFactory(llm);
+        var client = factory.CreateClient();
+        await ConfigureLlmAsync(client);
+        await GenerateOkAsync(client, new { gameId = "sokoban-toy", targetDifficulty = 1, levelNumber = "3" });
+
+        var prompt = llm.RequestBodies[0];
+        Assert.Contains("坐标制", prompt);
+        // 只看 few-shot 示例区：提示词正文里的格式说明书本来就含原生 grid 示例（那是规则文档，合理）
+        var idx = prompt.IndexOf("历史关卡示例", StringComparison.Ordinal);
+        Assert.True(idx > 0, "提示词应包含示例区");
+        var exampleSection = prompt[idx..];
+        Assert.Contains("boxes", exampleSection);        // 示例是坐标制
+        Assert.DoesNotContain("######", exampleSection); // 示例里不得夹带原生 grid 行
+    }
 }

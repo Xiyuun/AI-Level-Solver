@@ -74,7 +74,7 @@ public sealed class AStarSolver<TLevel, TState, TMove> : ISearchStrategy<TLevel,
             if (!request.FullEnumeration)
             {
                 return Build(SolveStatus.Solved, TerminationReason.GoalFound, [],
-                    Metrics(0, 1, 0, sw, 0), null, sw);
+                    Metrics(0, 0, 1, 0, sw, 0), null, sw);
             }
         }
         bestG[initialKey] = 0;
@@ -119,7 +119,7 @@ public sealed class AStarSolver<TLevel, TState, TMove> : ISearchStrategy<TLevel,
                 {
                     var early = Reconstruct(bundle, parents, initialKey, foundKey);
                     return Build(SolveStatus.Solved, TerminationReason.GoalFound, early,
-                        Metrics(expanded, bestG.Count, frontierPeak, sw, early.Count), null, sw);
+                        Metrics(expanded, generated, bestG.Count, frontierPeak, sw, early.Count), null, sw);
                 }
             }
 
@@ -144,11 +144,11 @@ public sealed class AStarSolver<TLevel, TState, TMove> : ISearchStrategy<TLevel,
         {
             var solution = Reconstruct(bundle, parents, initialKey, foundKey);
             return Build(SolveStatus.Solved, TerminationReason.FrontierEmpty, solution,
-                Metrics(expanded, bestG.Count, frontierPeak, sw, solution.Count), null, sw,
+                Metrics(expanded, generated, bestG.Count, frontierPeak, sw, solution.Count), null, sw,
                 graphComplete: true, scope: MetricsScope.FullReachableGraph);
         }
         return Build(SolveStatus.UnsolvableProven, TerminationReason.FrontierEmpty, [],
-            Metrics(expanded, bestG.Count, frontierPeak, sw, 0), null, sw,
+            Metrics(expanded, generated, bestG.Count, frontierPeak, sw, 0), null, sw,
             graphComplete: true, scope: MetricsScope.FullReachableGraph);
     }
 
@@ -168,9 +168,9 @@ public sealed class AStarSolver<TLevel, TState, TMove> : ISearchStrategy<TLevel,
         {
             var solution = ReconstructFrom(parents, initialKey, foundKey);
             return Build(SolveStatus.Solved, reason, solution,
-                Metrics(expanded, bestG.Count, frontierPeak, sw, solution.Count), message, sw);
+                Metrics(expanded, generated, bestG.Count, frontierPeak, sw, solution.Count), message, sw);
         }
-        return Build(status, reason, [], Metrics(expanded, bestG.Count, frontierPeak, sw, 0), message, sw);
+        return Build(status, reason, [], Metrics(expanded, generated, bestG.Count, frontierPeak, sw, 0), message, sw);
     }
 
     // 沿父记录重建（含每步前状态）
@@ -214,10 +214,11 @@ public sealed class AStarSolver<TLevel, TState, TMove> : ISearchStrategy<TLevel,
         return new SolveResult(status, optimality, graphComplete, reason, scope, solution, metrics, errorMessage);
     }
 
-    // 计数器打包
-    private static SearchMetrics Metrics(long expanded, long unique, long frontierPeak, Stopwatch sw, int solutionLength)
+    // 计数器打包：平均分支 = 累计生成后继数 / 已展开状态数（与 BfsSolver 同一口径）
+    // A* 生成的后继含"已被 close 或已有更优 g"的重复项，但它们同样是该状态的真实分支尝试，故计入分母外的分子
+    private static SearchMetrics Metrics(long expanded, long generated, long unique, long frontierPeak, Stopwatch sw, int solutionLength)
     {
-        var avgBranching = expanded > 0 ? (double)0 : 0;   // A* 的 generated 含重复入队，分支统计语义不同，置 0 并由 metricsScope 说明
+        var avgBranching = expanded > 0 ? (double)generated / expanded : 0;
         return new SearchMetrics(expanded, unique, frontierPeak, sw.ElapsedMilliseconds, solutionLength, avgBranching);
     }
 

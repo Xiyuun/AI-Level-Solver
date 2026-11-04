@@ -15,11 +15,26 @@ public static class PromptBuilder
     private const double Temperature = 0.8;     // 适中偏高：鼓励多样性（§5 温度与采样）
 
     // 基础消息：系统提示词（玩法规则书 + 格式说明书 + 输出约定）+ 用户消息（参数 + few-shot）
+    // compositionSpec：玩法支持坐标制出题时的"输出什么"说明——有它则覆盖"直接输出原生 JSON"的约定
     public static List<ChatMessage> Build(
         GameRegistration registration, int targetBand,
         string? levelNumber, string? mechanicsNote, string? specialRequirements,
-        IReadOnlyList<string> fewShot)
+        IReadOnlyList<string> fewShot, string? compositionSpec = null)
     {
+        // 坐标制：模型只描述设计意图，格式由代码拼装（格式说明书仍作为规则背景保留）
+        var outputBlock = string.IsNullOrWhiteSpace(compositionSpec)
+            ? """
+
+              # 输出约定
+              只输出一道关卡的 JSON 原文：不要 markdown 代码块，不要任何解释文字，不要输出多道关卡。
+              """
+            : $"""
+
+              {compositionSpec}
+
+              # 输出约定
+              只输出一个 JSON 对象：不要 markdown 代码块，不要任何解释文字。
+              """;
         var system = $"""
             你是关卡设计师，为以下玩法设计一道新关卡。
 
@@ -28,9 +43,7 @@ public static class PromptBuilder
 
             # 关卡格式
             {registration.FormatSpec}
-
-            # 输出约定
-            只输出一道关卡的 JSON 原文：不要 markdown 代码块，不要任何解释文字，不要输出多道关卡。
+            {outputBlock}
             """;
         var user = new StringBuilder();
         user.AppendLine($"目标难度：第 {targetBand} 档（{DifficultyModel.BandName(targetBand)}）");

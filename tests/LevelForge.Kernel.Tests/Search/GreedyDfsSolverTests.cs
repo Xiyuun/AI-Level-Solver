@@ -66,6 +66,19 @@ public class GreedyDfsSolverTests
         Assert.NotEqual(SolveStatus.UnsolvableProven, result.Status);
     }
 
+    // 诚实指标防线：贪心 DFS 同样必须报真实分支因子（曾经写死 0）
+    [Fact]
+    public void 平均分支因子_由真实后继数算出而非占位0()
+    {
+        var level = new SyntheticLevel(0, 5, new[] { (0, 1), (0, 2), (1, 3), (2, 3), (3, 4), (4, 5) });
+        var result = Greedy.Solve(SyntheticGraphAdapter.CreateBundle(), new SolveRequest<SyntheticLevel>(level));
+
+        Assert.NotNull(result.Metrics);
+        Assert.True(result.Metrics!.StatesExplored > 0);
+        Assert.True(result.Metrics.AvgBranchingFactor > 0,
+            $"平均分支因子应为正数，实际 {result.Metrics.AvgBranchingFactor}");
+    }
+
     [Fact]
     public void 未声明启发式_明确拒绝()
     {

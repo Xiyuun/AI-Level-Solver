@@ -1,12 +1,16 @@
+using System.Text.Json;
 using LevelForge.Platform.Database;
 using LevelForge.Platform.Generation;
 
 namespace LevelForge.Platform.Api;
 
-// 生成端点：发起生成（同步跑完整轮重生循环）、运行历史查询
-// 流水线实时日志推送到前端留给第13步（SSE/轮询届时定）；本轮先返回完整候选记录
+// 生成端点：同步整轮生成（保留兼容）、运行历史查询、异步任务 + SSE 实时进度
+// 异步通道是工作台主路径（前后端全流程优化 §8.4）；同步接口留给脚本与既有测试
 public static class GenerationEndpoints
 {
+    // SSE 手工序列化口径：与全局 API 一致（camelCase）
+    private static readonly JsonSerializerOptions SseJson = new(JsonSerializerDefaults.Web);
+
     public static void Map(IEndpointRouteBuilder app)
     {
         // 发起生成：LLM 出题 → 校验 → 判卷 → 重生，同步返回整轮结论
@@ -54,6 +58,77 @@ public static class GenerationEndpoints
                 AdoptedAttemptOf(run, candidates), run.FailureSummary, RunElapsedMs(run));
             return Results.Ok(dto);
         });
+
+        // ---- 异步生成任务（前后端全流程优化 §8.4）----
+        // 动机：整轮生成可达数十秒到数分钟，同步接口会让前端死屏；改为立即返回任务号 + SSE 实时进度 + 可取消
+
+        // 发起：202 + 任务号（请求校验错误也落成任务终态，不阻塞调用方）
+        app.MapPost("/api/generate/jobs", (GenerateRequestDto req, GenerationJobService jobs,
+            LevelForge.Platform.Facades.GameRegistry registry) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.GameId) || !registry.TryGet(req.GameId, out _))
+            {
+                return Results.NotFound(new { message = $"未知玩法：{req.GameId}" });
+            }
+            var job = jobs.Start(new GenerationRequest(
+                req.GameId, req.TargetDifficulty, req.LevelNumber,
+                req.SpecialRequirements, req.CandidateLimit, req.SolveTimeoutMs));
+            return Results.Accepted($"/api/generate/jobs/{job.JobId}", new GenerationJobStartedDto(job.JobId));
+        });
+
+        // 快照：轮询/断线重连用（终态附完整运行记录）
+        app.MapGet("/api/generate/jobs/{jobId:long}", (long jobId, GenerationJobService jobs) =>
+        {
+            var job = jobs.Get(jobId);
+            return job is null
+                ? Results.NotFound(new { message = $"生成任务不存在：{jobId}" })
+                : Results.Ok(ToJobDto(job.Snapshot()));
+        });
+
+        // 取消：中断 LLM 调用与求解，任务落 cancelled
+        app.MapPost("/api/generate/jobs/{jobId:long}/cancel", (long jobId, GenerationJobService jobs) =>
+        {
+            var job = jobs.Get(jobId);
+            if (job is null)
+            {
+                return Results.NotFound(new { message = $"生成任务不存在：{jobId}" });
+            }
+            job.Cancel();
+            return Results.Ok(new { message = "已请求取消" });
+        });
+
+        // SSE：先回放已发生事件再持续推送，最后一条 event: done 携带完整结论
+        app.MapGet("/api/generate/jobs/{jobId:long}/events",
+            async (long jobId, GenerationJobService jobs, HttpContext http) =>
+        {
+            var job = jobs.Get(jobId);
+            if (job is null)
+            {
+                http.Response.StatusCode = StatusCodes.Status404NotFound;
+                await http.Response.WriteAsync($"生成任务不存在：{jobId}");
+                return;
+            }
+            http.Response.ContentType = "text/event-stream; charset=utf-8";
+            http.Response.Headers.CacheControl = "no-cache";
+            http.Response.Headers["X-Accel-Buffering"] = "no";   // 反向代理不缓冲，保证实时
+            try
+            {
+                await foreach (var evt in job.Subscribe(http.RequestAborted))
+                {
+                    var payload = JsonSerializer.Serialize(ToEventDto(evt), SseJson);
+                    await http.Response.WriteAsync(
+                        $"event: progress\nid: {evt.Seq}\ndata: {payload}\n\n", http.RequestAborted);
+                    await http.Response.Body.FlushAsync(http.RequestAborted);
+                }
+                var final = JsonSerializer.Serialize(ToJobDto(job.Snapshot()), SseJson);
+                await http.Response.WriteAsync($"event: done\ndata: {final}\n\n", http.RequestAborted);
+                await http.Response.Body.FlushAsync(http.RequestAborted);
+            }
+            catch (OperationCanceledException)
+            {
+                // 客户端断开：正常收场；任务仍在后台跑，可重新订阅
+            }
+        });
     }
 
     #region 内部工具
@@ -90,6 +165,22 @@ public static class GenerationEndpoints
             return (long)(end - start).TotalMilliseconds;
         }
         return 0;
+    }
+
+    // 进度事件 → DTO
+    private static GenerationEventDto ToEventDto(GenerationEvent e)
+    {
+        return new GenerationEventDto(e.Seq, e.ElapsedMs, e.Stage, e.Message, e.AttemptIndex, e.FailureClass);
+    }
+
+    // 任务快照 → DTO（终态时附运行记录）
+    private static GenerationJobDto ToJobDto(GenerationJobSnapshot snap)
+    {
+        return new GenerationJobDto(
+            snap.JobId, snap.Status, snap.ElapsedMs,
+            snap.Events.Select(ToEventDto).ToList(),
+            snap.Run is null ? null : ToDto(snap.Run),
+            snap.Error);
     }
 
     #endregion

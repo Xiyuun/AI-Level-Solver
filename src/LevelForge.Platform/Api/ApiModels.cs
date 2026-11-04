@@ -94,6 +94,21 @@ public sealed record GenerationRunDto(
     IReadOnlyList<CandidateAttemptDto> Candidates,
     int? AdoptedAttempt, string? FailureSummary, long TotalElapsedMs);
 
+// ---- 异步生成任务（SSE 进度）----
+
+// 发起后台生成：返回任务号，进度走 SSE
+public sealed record GenerationJobStartedDto(long JobId);
+
+// 一条进度事件（前端进度层与流水线日志共用）
+public sealed record GenerationEventDto(
+    long Seq, long ElapsedMs, string Stage, string Message, int? AttemptIndex, string? FailureClass);
+
+// 任务快照：运行中只给事件，终态附完整运行记录
+public sealed record GenerationJobDto(
+    long JobId, string Status, long ElapsedMs,
+    IReadOnlyList<GenerationEventDto> Events,
+    GenerationRunDto? Run, string? Error);
+
 // ---- 采纳与执行确认 ----
 
 // 采纳落盘请求：source = generated（生成候选）| imported（质检/手摆导入）

@@ -1,7 +1,7 @@
 // 生成工作台的纯逻辑层：页面状态机、失败建议映射、流水线日志构造、机制范围提示
 // 全部纯函数（vitest 直接测），组件只做展示与装配（表现层_生成工作台 §3/§5）
 
-import type { CandidateAttempt, GenerationRun } from '../api/client'
+import type { CandidateAttempt, GenerationEvent, GenerationRun } from '../api/client'
 
 // ---- 页面状态机（§3）----
 
@@ -112,6 +112,34 @@ export function logEntriesFromRun(run: GenerationRun): LogEntry[] {
     entries.push(integration('运行已取消'))
   }
   return entries
+}
+
+// ---- 实时进度（SSE 事件流 → 日志行 + 进度层文案）----
+
+// 事件流 → 日志行：生成中逐条追加，终态时用完整事件回放，两者共用同一映射
+export function logEntriesFromEvents(events: GenerationEvent[]): LogEntry[] {
+  return events.map((event) => ({ role: normalizeRole(event.stage), text: event.message }))
+}
+
+// 进度层主文案：取最新一条事件；无事件时给等待提示
+export function progressHeadline(events: GenerationEvent[]): string {
+  const last = events[events.length - 1]
+  return last ? last.message : '正在准备生成…'
+}
+
+// 进度层副文案：已烧掉多少次调用 + 阶段计数，让用户判断"机器是不是在动"
+export function progressFootnote(events: GenerationEvent[]): string {
+  const llmCalls = events.filter((e) => e.stage === 'llm').length
+  const solvers = events.filter((e) => e.stage === 'solver').length
+  const attempts = new Set(events.map((e) => e.attemptIndex).filter((i): i is number => i !== null)).size
+  return `候选 ${attempts} 个 · 模型调用 ${llmCalls} 次 · 求解 ${solvers} 次`
+}
+
+// 阶段 → 日志角色（未知阶段归入集成）
+function normalizeRole(stage: string): LogRole {
+  return stage === 'llm' || stage === 'solver' || stage === 'difficulty' || stage === 'constraint'
+    ? stage
+    : 'integration'
 }
 
 // ---- 机制范围提示（§4：编号下方灰字显示该编号的机制解锁范围）----

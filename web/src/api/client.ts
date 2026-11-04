@@ -222,6 +222,89 @@ export function generate(gameId: string, req: {
   })
 }
 
+// ---- 异步生成任务（实时进度）----
+// 动机：整轮生成可达数分钟，同步接口会让页面长时间无反馈；改为任务号 + SSE 事件流（全流程优化 §8.4）
+
+export interface GenerationEvent {
+  seq: number
+  elapsedMs: number
+  stage: string // llm | solver | difficulty | constraint | integration
+  message: string
+  attemptIndex: number | null
+  failureClass: string | null
+}
+
+export interface GenerationJob {
+  jobId: number
+  status: string // running | succeeded | failed | cancelled
+  elapsedMs: number
+  events: GenerationEvent[]
+  run: GenerationRun | null
+  error: string | null
+}
+
+export interface GenerateParams {
+  targetDifficulty: number
+  levelNumber?: string
+  specialRequirements?: string
+  candidateLimit?: number
+  solveTimeoutMs?: number
+}
+
+// 发起后台生成：立即返回任务号（202）
+export async function startGenerationJob(gameId: string, req: GenerateParams): Promise<number> {
+  const resp = await fetch('/api/generate/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gameId, ...req }),
+  })
+  const text = await resp.text()
+  if (!resp.ok) throw new Error(`发起生成失败 HTTP ${resp.status}: ${text.slice(0, 200)}`)
+  return (JSON.parse(text) as { jobId: number }).jobId
+}
+
+// 任务快照（断线重连/兜底轮询）
+export const getGenerationJob = (jobId: number) => getJson<GenerationJob>(`/api/generate/jobs/${jobId}`)
+
+// 取消任务
+export function cancelGenerationJob(jobId: number): Promise<void> {
+  return sendJson<{ message: string }>(`/api/generate/jobs/${jobId}/cancel`, 'POST').then(() => undefined)
+}
+
+// 订阅 SSE：返回取消订阅函数。progress 逐条回调，done 回调携带终态与运行记录
+export function subscribeGenerationJob(
+  jobId: number,
+  handlers: {
+    onProgress: (event: GenerationEvent) => void
+    onDone: (job: GenerationJob) => void
+    onError: (message: string) => void
+  },
+): () => void {
+  const source = new EventSource(`/api/generate/jobs/${jobId}/events`)
+  source.addEventListener('progress', (raw) => {
+    try {
+      handlers.onProgress(JSON.parse((raw as MessageEvent).data as string) as GenerationEvent)
+    } catch {
+      // 坏帧忽略：事件流不该因单条解析失败中断
+    }
+  })
+  source.addEventListener('done', (raw) => {
+    source.close()
+    try {
+      handlers.onDone(JSON.parse((raw as MessageEvent).data as string) as GenerationJob)
+    } catch (e) {
+      handlers.onError(`终态解析失败：${(e as Error).message}`)
+    }
+  })
+  source.onerror = () => {
+    // 浏览器会自动重连；只有连接彻底不可用才提示（终态由 done 负责收尾）
+    if (source.readyState === EventSource.CLOSED) {
+      handlers.onError('进度连接已断开')
+    }
+  }
+  return () => source.close()
+}
+
 // 试玩
 export const playStart = (gameId: string, levelJson: string) =>
   sendJson<PlayState>('/api/play/start', 'POST', { gameId, levelJson })
