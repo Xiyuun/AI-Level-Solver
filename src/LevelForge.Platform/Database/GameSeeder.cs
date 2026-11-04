@@ -131,14 +131,20 @@ public static class GameSeeder
     // 接入任务：六步行 INSERT OR IGNORE；已投产玩法直接种子为已完成
     private static void SeedOnboardingTasks(AppDatabase db, GameRegistration r)
     {
-        var status = r.Status == GameStatus.Production ? "done" : "todo";
-        var note = r.Status == GameStatus.Production ? "\"内置玩法：随平台发布，向导已完成\"" : "null";
+        SeedOnboardingTasks(db, r.GameId, r.Status == GameStatus.Production);
+    }
+
+    // 导入项目也走六步任务（三轮 N10）：全部 todo，由用户在向导里逐步推进
+    public static void SeedOnboardingTasks(AppDatabase db, string gameId, bool production)
+    {
+        var status = production ? "done" : "todo";
+        var note = production ? "\"内置玩法：随平台发布，向导已完成\"" : "null";
         foreach (var (step, title) in WizardSteps)
         {
             using var conn = db.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "INSERT OR IGNORE INTO onboarding_tasks (game_id, step, title, status, detail_json, updated_at) VALUES ($g, $s, $t, $st, $d, $now)";
-            cmd.Parameters.AddWithValue("$g", r.GameId);
+            cmd.Parameters.AddWithValue("$g", gameId);
             cmd.Parameters.AddWithValue("$s", step);
             cmd.Parameters.AddWithValue("$t", title);
             cmd.Parameters.AddWithValue("$st", status);

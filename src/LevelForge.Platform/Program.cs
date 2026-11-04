@@ -37,6 +37,7 @@ builder.Services.AddSingleton<OnboardingStore>();
 builder.Services.AddSingleton<GateService>();
 builder.Services.AddSingleton<AdoptionService>();
 builder.Services.AddSingleton<LevelImporter>();       // 原生关卡导入（接入向导③：游戏项目目录 → 平台库）
+builder.Services.AddSingleton<ProjectImporter>();     // 项目导入（三轮 N10：选目录 → 识别 Unity/Cocos → 登记玩法）
 builder.Services.AddSingleton<LevelForge.Platform.Batch.BatchService>();   // 批量生产（同一流水线的调度层）
 builder.Services.AddHttpClient<LlmClient>();            // LLM 客户端：OpenAI 兼容协议，实例自带 key
 
@@ -71,6 +72,7 @@ if (hasDist)
 }
 
 GameEndpoints.Map(app);
+ProjectEndpoints.Map(app);
 SolveEndpoints.Map(app);
 SettingsEndpoints.Map(app);
 PhraseEndpoints.Map(app);

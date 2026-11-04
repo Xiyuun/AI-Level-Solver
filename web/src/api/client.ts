@@ -12,6 +12,8 @@ export interface GameSummary {
   kernelVer: string
   gate2Applicable: boolean
   levelCount: number
+  adapterReady: boolean // 适配层是否已注册（导入未接入的玩法为 false）
+  engineType: string | null // 导入项目的引擎识别结果（unity / cocos-creator3 / …；内置玩法为 null）
 }
 
 export interface GameDetail extends GameSummary {
@@ -24,6 +26,7 @@ export interface GameDetail extends GameSummary {
   gameBrief: string
   formatSpec: string
   ruleMatrix: string
+  projectRoot: string | null // 导入项目的根目录（内置玩法为 null）
 }
 
 export interface LevelRow {
@@ -189,6 +192,38 @@ export const listGames = () => getJson<GameSummary[]>('/api/games')
 export const getGame = (gameId: string) => getJson<GameDetail>(`/api/games/${gameId}`)
 export const activateGame = (gameId: string) =>
   sendJson<void>(`/api/games/${gameId}/activate`, 'PUT')
+
+// 项目导入（用户流程第②步：选目录 → 识别 Unity/Cocos → 登记玩法）
+export interface ProjectImportResult {
+  gameId: string
+  displayName: string
+  engineType: string
+  projectRoot: string
+  alreadyImported: boolean
+}
+
+// 导入失败时把后端的可操作错误（目录不存在/无法识别/撞名）从 HTTP 错误文本里解出来
+export class ProjectImportError extends Error {
+  constructor(message: string, readonly conflict: boolean) {
+    super(message)
+  }
+}
+
+export async function importProject(directory: string): Promise<ProjectImportResult> {
+  const resp = await fetch('/api/projects/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ directory }),
+  })
+  const text = await resp.text()
+  if (!resp.ok) {
+    const payload = safeParse(text)
+    throw new ProjectImportError(payload?.message ?? `导入失败：HTTP ${resp.status}`, resp.status === 409)
+  }
+  return JSON.parse(text) as ProjectImportResult
+}
+
+export const recentProjects = () => getJson<string[]>('/api/projects/recent')
 
 // 求解与磁带
 export const listLevels = (gameId: string) => getJson<LevelRow[]>(`/api/games/${gameId}/levels`)

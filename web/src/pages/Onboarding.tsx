@@ -19,6 +19,39 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
   const [tasks, setTasks] = useState<OnboardingTask[]>([])
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  // 适配层需求包（三轮 N12 简版）：静态模板 + 导入信息拼装——交给外部 AI 编程助手执行（冻结决策：薄页面，平台内不做适配层生成）
+  const adapterPrompt = [
+    `请为 LevelForge 平台制作「${game.displayName}」的求解器适配层。`,
+    '',
+    '# 项目信息',
+    `- 引擎类型：${game.engineType ?? '未知'}`,
+    `- 项目根目录：${detail.projectRoot ?? '（见下方说明，请向用户确认）'}`,
+    `- 注册标识（gameId，必须一字不差）：${game.gameId}`,
+    '- 工具仓库：LevelForge_glm',
+    '',
+    '# 任务步骤',
+    '1. 阅读 LevelForge_glm/skills/onboarding-skill/（onboarding.md=接入总纲；deliverables.md=产物清单；contract.md=接入契约；reference/=实战参考）。',
+    '2. 探索上面的项目根目录，找到关卡数据目录与关卡格式，产出资格评估结论（四问 + 证据）。',
+    '3. 按 skill 产出一套适配层：关卡解析、状态/动作模型、求解适配，以及规则矩阵/格式说明书/机制表/视觉映射等接入产物。',
+    `4. 把门面登记进 LevelForge_glm/src/LevelForge.Platform/Facades/GameRegistry.cs（GameId 必须是「${game.gameId}」，与已导入的玩法行绑定）。`,
+    '5. 重新构建（dotnet build LevelForge_glm/LevelForge.slnx），提示用户重启平台，然后在平台「接入向导」运行门1 验收。',
+    '',
+    '# 约束',
+    '- 严格遵循接入契约与诚实语义：非法数据必须抛异常，禁止静默修复；未知照实标注，不冒充结论。',
+    '- 参考实现：src/Adapters/SokobanToy（最小示例）、src/Adapters/SlidePig（实战参考，含踩坑记录）。',
+  ].join('\n')
+
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(adapterPrompt)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setError('复制失败：请手动选择文本复制')
+    }
+  }
 
   // ①登记表单
   const [driverCommand, setDriverCommand] = useState('')
@@ -190,6 +223,18 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
         {/* ③产物验收 + 门1 */}
         <section className={`ob-step ${statusOf(3) === 'done' ? 'step-done' : ''}`}>
           <h4>{stepTitle(3)} <span className={chip(statusOf(3))}>{statusOf(3)}</span></h4>
+          {/* 适配层未接入：给"怎么让 AI 做"的可复制需求包（导入项目在完成这一步前，其余产物无从谈起） */}
+          {!game.adapterReady && (
+            <div className="adapter-guide">
+              <div className="ob-note">
+                「{game.displayName}」还没有适配层。把下面的需求包交给你的 AI 编程助手（如 ZCode / Cursor）执行；
+                完成后<b>重新构建平台并重启</b>，回到本页运行门1。
+              </div>
+              <pre className="adapter-guide-prompt">{adapterPrompt}</pre>
+              <button onClick={() => void copyPrompt()}>复制需求提示词</button>
+              {copied && <span className="ok-inline"> 已复制</span>}
+            </div>
+          )}
           <ul className="artifact-list">
             {artifacts.map((a) => (
               <li key={a.name} className={a.ok ? 'ok' : 'missing'}>
@@ -197,9 +242,15 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
               </li>
             ))}
           </ul>
-          {/* 历史关卡导入（产物 #3）：逐关三栏，跳过原因可导出 */}
-          <ImportPanel gameId={game.gameId} defaultDirectory={detail.levelsRoot} />
-          <button onClick={() => void submitGate1()}>运行门1（五项合规检查）</button>
+          {/* 历史关卡导入（产物 #3）：需要适配层的格式校验器，未接入时只给指引 */}
+          {game.adapterReady ? (
+            <ImportPanel gameId={game.gameId} defaultDirectory={detail.levelsRoot} />
+          ) : (
+            <div className="ob-note">关卡导入需要适配层的格式校验器——先完成上面的适配层制作并重启平台。</div>
+          )}
+          {game.adapterReady && (
+            <button onClick={() => void submitGate1()}>运行门1（五项合规检查）</button>
+          )}
           {gate1 && (
             <div className="gate1-cards">
               {Object.entries(gate1.report ?? {}).map(([name, result]) => (

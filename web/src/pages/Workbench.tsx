@@ -43,7 +43,11 @@ interface FormState {
   adjustedFields: string[]
 }
 
-export function Workbench({ game, detail }: { game: GameSummary; detail: GameDetail }) {
+export function Workbench({ game, detail, onOpenOnboarding }: {
+  game: GameSummary
+  detail: GameDetail
+  onOpenOnboarding?: () => void
+}) {
   const [mode, setMode] = useState<'generate' | 'qc'>('generate')
   const [phase, setPhase] = useState<Phase>('idle')
   const [form, setForm] = useState<FormState>({
@@ -266,6 +270,26 @@ export function Workbench({ game, detail }: { game: GameSummary; detail: GameDet
   }
 
   const generating = phase === 'generating'
+
+  // 适配层未接入（导入的项目在向导完成前）：生成/质检/试玩都不可用——引导去接入向导而不是摆出空表单
+  if (!game.adapterReady) {
+    return (
+      <div className="workbench">
+        <div className="stage-empty adapter-missing">
+          <div className="stage-empty-art">🧩</div>
+          <div className="stage-empty-title">「{game.displayName}」的适配层尚未接入</div>
+          <div className="stage-empty-hint">
+            这个项目已登记，但还没有求解器适配层——生成、求解与试玩都要等它就绪。
+            {game.engineType && <>（识别为 {game.engineType} 项目）</>}
+            去顶栏「接入向导」跟随指引制作适配层；完成后重新构建平台并重启，这里就会亮起来。
+          </div>
+          {onOpenOnboarding && (
+            <button className="primary" onClick={onOpenOnboarding}>去接入向导</button>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="workbench">

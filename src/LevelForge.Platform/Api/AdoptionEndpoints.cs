@@ -16,8 +16,12 @@ public static class AdoptionEndpoints
     public static void Map(IEndpointRouteBuilder app)
     {
         // 采纳落盘：生成候选/质检内容 → 安全写盘 + 登记待执行确认
-        app.MapPost("/api/adopt", (AdoptRequestDto req, AdoptionService adoption) =>
+        app.MapPost("/api/adopt", (AdoptRequestDto req, AdoptionService adoption,
+            GameStore games, GameRegistry registry) =>
         {
+            // 落盘目标路径与格式校验都来自适配层：未接入的玩法给出可操作的提示
+            var (_, problem) = GameAccess.Resolve(req.GameId, games, registry);
+            if (problem is not null) return problem;
             var source = req.Source == LevelSource.Imported ? LevelSource.Imported : LevelSource.Generated;
             try
             {

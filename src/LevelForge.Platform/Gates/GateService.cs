@@ -60,6 +60,14 @@ public sealed class GateService
         _db = db;
     }
 
+    // "未知玩法"与"已导入未接入"的口径区分（三轮 N11）：前者查无此玩法，后者差适配层
+    private string DescribeUnknown(string gameId)
+    {
+        return _games.FindGame(gameId) is null
+            ? $"未知玩法：{gameId}"
+            : "该玩法的适配层尚未接入：请先完成接入向导并重新构建平台";
+    }
+
     #region 门1：规则测试集
 
     // 门1：五项合规检查 + 规则矩阵指纹登记；全绿零豁免才 pass
@@ -67,7 +75,8 @@ public sealed class GateService
     {
         if (string.IsNullOrWhiteSpace(gameId) || !_registry.TryGet(gameId, out var facade))
         {
-            throw new GateException($"未知玩法：{gameId}");
+            // 已导入未接入的玩法给可操作的提示（三轮 N11），而不是笼统的"未知玩法"
+            throw new GateException(DescribeUnknown(gameId));
         }
         var report = facade.RunGate1Checks();
         var reg = facade.Registration;

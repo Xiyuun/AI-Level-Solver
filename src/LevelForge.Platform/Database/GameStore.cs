@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 namespace LevelForge.Platform.Database;
 
 // 玩法行：games 表整行 + 关卡数（列表页一次查询带回）
+// ProjectRoot/EngineType：仅导入的项目有值（静态注册玩法为 NULL，见 AppDatabase Migrate v2）
 public sealed record GameRow(
     string Id, string DisplayName, string Status,
     string AdapterVer, string AdapterHash, string KernelVer, string ContractVer,
@@ -10,6 +11,7 @@ public sealed record GameRow(
     string VisualMappingJson, string MechanicsJson, string GameBrief, string FormatSpec,
     string RuleMatrix, string DifficultyWeightsJson,
     string? Gate2DriverJson,
+    string? ProjectRoot, string? EngineType,
     string RegisteredAt, string UpdatedAt, long LevelCount);
 
 // 关卡行：levels 表整行
@@ -87,6 +89,34 @@ public sealed class GameStore
             reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6));
     }
 
+    // 导入项目落库：占位行（接入产物在适配层完成后由种子注册对齐）。
+    // gameId 已存在返回 false（调用方转为"已导入/撞名"语义）
+    public bool InsertImportedGame(string gameId, string displayName, string engineType, string projectRoot)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO games (id, display_name, status, adapter_ver, adapter_hash, kernel_ver, contract_ver,
+              levels_root, gate2_applicable, visual_mapping_json, mechanics_json, game_brief, format_spec,
+              rule_matrix, difficulty_weights_json, project_root, engine_type, registered_at, updated_at)
+            VALUES ($id, $name, 'onboarding', '0.0.0', '', '0.0.0', '-',
+              '', 0, '{}', '{}', '', '', '', '{}', $root, $engine, $now, $now)
+            """;
+        cmd.Parameters.AddWithValue("$id", gameId);
+        cmd.Parameters.AddWithValue("$name", displayName);
+        cmd.Parameters.AddWithValue("$root", projectRoot);
+        cmd.Parameters.AddWithValue("$engine", engineType);
+        cmd.Parameters.AddWithValue("$now", AppDatabase.UtcNowIso);
+        try
+        {
+            return cmd.ExecuteNonQuery() == 1;
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)   // SQLITE_CONSTRAINT：主键已存在
+        {
+            return false;
+        }
+    }
+
     // 关卡登记 upsert：安全落盘成功后调用（同编号覆盖内容与哈希；来源随调用方）
     public void UpsertLevel(string gameId, string levelId, string levelHash, string contentJson, string source)
     {
@@ -133,6 +163,8 @@ public sealed class GameStore
                 reader.GetString(reader.GetOrdinal("rule_matrix")),
                 reader.GetString(reader.GetOrdinal("difficulty_weights_json")),
                 reader.IsDBNull(reader.GetOrdinal("gate2_driver_json")) ? null : reader.GetString(reader.GetOrdinal("gate2_driver_json")),
+                reader.IsDBNull(reader.GetOrdinal("project_root")) ? null : reader.GetString(reader.GetOrdinal("project_root")),
+                reader.IsDBNull(reader.GetOrdinal("engine_type")) ? null : reader.GetString(reader.GetOrdinal("engine_type")),
                 reader.GetString(reader.GetOrdinal("registered_at")),
                 reader.GetString(reader.GetOrdinal("updated_at")),
                 reader.GetInt64(reader.GetOrdinal("level_count"))));

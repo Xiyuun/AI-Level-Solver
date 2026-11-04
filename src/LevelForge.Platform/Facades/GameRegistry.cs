@@ -9,8 +9,10 @@ public sealed class GameRegistry
 
     private readonly Dictionary<string, IGameFacade> _games = new()
     {
-        ["sokoban-toy"] = new SokobanToyFacade(),
-        ["slide-pig"] = new SlidePigFacade()   // 第16步接入：试用态（门2/门3 未跑，结论带水印）
+        ["sokoban-toy"] = new SokobanToyFacade()
+        // slide-pig 已按三轮计划移出注册表（2026-11-04）：真实 PiggyFarm 项目改走「导入项目」流程，
+        // 适配层由接入向导指引外部 AI 产出后在此登记（换玩法=改这里+重新构建，冻结决策不变）。
+        // SlidePigFacade/Adapters.SlidePig 源码保留：作为 PiggyFarm 适配层的参考实现与内核搜索测试载体。
     };
 
     public IReadOnlyCollection<IGameFacade> Facades => _games.Values;

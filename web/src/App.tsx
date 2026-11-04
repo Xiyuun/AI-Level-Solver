@@ -1,6 +1,7 @@
-// 应用壳：顶栏玩法切换 + 四页签（工作台 / 批量 / 接入向导 / 设置）+ 主题落地
+// 应用壳：顶栏玩法切换 + 导入项目 + 四页签（工作台 / 批量 / 接入向导 / 设置）+ 主题落地
 import { useCallback, useEffect, useState } from 'react'
 import { activateGame, getGame, getSettings, listGames, type GameDetail, type GameSummary } from './api/client'
+import { ImportProjectDialog } from './components/ImportProjectDialog'
 import { Batch } from './pages/Batch'
 import { Onboarding } from './pages/Onboarding'
 import { Settings } from './pages/Settings'
@@ -16,6 +17,7 @@ export function App() {
   const [detail, setDetail] = useState<GameDetail | null>(null)
   const [error, setError] = useState('')
   const [theme, setTheme] = useState<Theme>('light')
+  const [importing, setImporting] = useState(false)
 
   // 主题：设置页存 ui.theme，这里读出来写到 <html data-theme>
   // （此前 render 里写的是 theme-${String('')}，主题永远等于空串，设置页那个下拉框从来没生效过）
@@ -80,6 +82,18 @@ export function App() {
 
   const current = games.find((g) => g.gameId === activeGame) ?? null
 
+  // 导入成功：激活新玩法并直接进入其接入向导（用户流程第②→③步的无缝衔接）
+  const handleImported = useCallback(async (gameId: string) => {
+    setImporting(false)
+    const list = await refreshGames()
+    const fresh = list.find((g) => g.gameId === gameId)
+    setActiveGame(gameId)
+    setTab('onboarding')
+    if (fresh) {
+      void activateGame(gameId).catch(() => undefined)
+    }
+  }, [refreshGames])
+
   return (
     <ThemeContext.Provider value={theme}>
       <div className="app">
@@ -99,6 +113,9 @@ export function App() {
               </option>
             ))}
           </select>
+          <button className="import-project-btn" onClick={() => setImporting(true)} title="导入 Cocos/Unity 项目目录，登记为待接入玩法">
+            ＋ 导入项目
+          </button>
           <nav className="tabs">
             <button className={tab === 'workbench' ? 'active' : ''} onClick={() => setTab('workbench')}>工作台</button>
             <button className={tab === 'batch' ? 'active' : ''} onClick={() => setTab('batch')}>批量</button>
@@ -109,9 +126,13 @@ export function App() {
 
         {error && <div className="error">{error}</div>}
 
+        {importing && (
+          <ImportProjectDialog onClose={() => setImporting(false)} onImported={(r) => void handleImported(r.gameId)} />
+        )}
+
         {current && detail ? (
           tab === 'workbench' ? (
-            <Workbench game={current} detail={detail} />
+            <Workbench game={current} detail={detail} onOpenOnboarding={() => setTab('onboarding')} />
           ) : tab === 'batch' ? (
             <Batch game={current} />
           ) : tab === 'onboarding' ? (

@@ -6,9 +6,11 @@ namespace LevelForge.Platform.Api;
 // ---- 玩法 ----
 
 // 玩法列表项（顶栏下拉数据源）
+// AdapterReady：适配层是否已注册（导入未接入的玩法为 false，前端据此禁用生成/求解并引导去向导）
 public sealed record GameSummaryDto(
     string GameId, string DisplayName, string Status, string StatusName,
-    string AdapterVer, string KernelVer, bool Gate2Applicable, long LevelCount);
+    string AdapterVer, string KernelVer, bool Gate2Applicable, long LevelCount,
+    bool AdapterReady, string? EngineType);
 
 // 玩法详情：接入产物全量（视觉映射/机制表/难度权重为解析后的 JSON 对象）
 public sealed record GameDetailDto(
@@ -17,7 +19,8 @@ public sealed record GameDetailDto(
     string LevelsRoot, bool Gate2Applicable, long LevelCount,
     JsonNode? VisualMapping, JsonNode? Mechanics, JsonNode? DifficultyWeights,
     string GameBrief, string FormatSpec, string RuleMatrix,
-    string RegisteredAt, string UpdatedAt);
+    string RegisteredAt, string UpdatedAt,
+    bool AdapterReady, string? EngineType, string? ProjectRoot);
 
 // 当前活跃玩法
 public sealed record ActiveGameDto(string GameId);
@@ -203,3 +206,12 @@ public sealed record OnboardingTaskDto(int Step, string Title, string Status, st
 
 // 关卡导入请求：游戏项目关卡目录（绝对路径）
 public sealed record ImportRequestDto(string Directory);
+
+// ---- 项目导入（三轮 N10）----
+
+// 导入请求：项目目录绝对路径（浏览器拿不到原生目录选择框，前端用路径输入 + 本地最近目录记忆）
+public sealed record ProjectImportRequestDto(string? Directory);
+
+// 导入结论：gameId 由目录名 slug 化；AlreadyImported=true 表示同目录重复导入（幂等）
+public sealed record ProjectImportResultDto(
+    string GameId, string DisplayName, string EngineType, string ProjectRoot, bool AlreadyImported);

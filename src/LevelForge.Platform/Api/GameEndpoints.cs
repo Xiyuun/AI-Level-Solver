@@ -9,17 +9,18 @@ public static class GameEndpoints
 {
     public static void Map(IEndpointRouteBuilder app)
     {
-        // 玩法列表（含状态标识与关卡数）
-        app.MapGet("/api/games", (GameStore games) =>
+        // 玩法列表（含状态标识与关卡数；AdapterReady 供前端区分"已接入/接入中"）
+        app.MapGet("/api/games", (GameStore games, GameRegistry registry) =>
         {
             var list = games.ListGames().Select(g => new GameSummaryDto(
                 g.Id, g.DisplayName, g.Status, GameStatus.DisplayNameOf(g.Status),
-                g.AdapterVer, g.KernelVer, g.Gate2Applicable, g.LevelCount)).ToList();
+                g.AdapterVer, g.KernelVer, g.Gate2Applicable, g.LevelCount,
+                registry.TryGet(g.Id, out _), g.EngineType)).ToList();
             return Results.Ok(list);
         });
 
         // 玩法详情：接入产物全量
-        app.MapGet("/api/games/{gameId}", (string gameId, GameStore games) =>
+        app.MapGet("/api/games/{gameId}", (string gameId, GameStore games, GameRegistry registry) =>
         {
             var g = games.FindGame(gameId);
             if (g is null) return Results.NotFound(new { message = $"未知玩法：{gameId}" });
@@ -28,7 +29,8 @@ public static class GameEndpoints
                 g.AdapterVer, g.AdapterHash, g.KernelVer, g.ContractVer,
                 g.LevelsRoot, g.Gate2Applicable, g.LevelCount,
                 ParseJson(g.VisualMappingJson), ParseJson(g.MechanicsJson), ParseJson(g.DifficultyWeightsJson),
-                g.GameBrief, g.FormatSpec, g.RuleMatrix, g.RegisteredAt, g.UpdatedAt));
+                g.GameBrief, g.FormatSpec, g.RuleMatrix, g.RegisteredAt, g.UpdatedAt,
+                registry.TryGet(g.Id, out _), g.EngineType, g.ProjectRoot));
         });
 
         // 当前活跃玩法
@@ -60,12 +62,15 @@ public static class GameEndpoints
 
         // 原生关卡导入（接入向导③：从游戏项目关卡目录批量入库；幂等，子集外如实跳过并计数）
         app.MapPost("/api/games/{gameId}/import-levels", async (
-            string gameId, Storage.LevelImporter importer, GameStore games, HttpContext http) =>
+            string gameId, Storage.LevelImporter importer, GameStore games, GameRegistry registry, HttpContext http) =>
         {
             if (games.FindGame(gameId) is null)
             {
                 return Results.NotFound(new { message = $"未知玩法：{gameId}" });
             }
+            // 关卡导入需要适配层的格式校验器：未接入的玩法给可操作的提示而不是笼统报错
+            var (_, problem) = GameAccess.Resolve(gameId, games, registry);
+            if (problem is not null) return problem;
             ImportRequestDto? body;
             try
             {

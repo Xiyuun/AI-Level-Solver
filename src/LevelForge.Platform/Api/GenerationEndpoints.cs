@@ -15,9 +15,11 @@ public static class GenerationEndpoints
     {
         // 发起生成：LLM 出题 → 校验 → 判卷 → 重生，同步返回整轮结论
         app.MapPost("/api/generate", async (GenerateRequestDto req, GenerationPipeline pipeline,
-            LevelForge.Platform.Facades.GameRegistry registry, HttpContext http) =>
+            LevelForge.Platform.Facades.GameRegistry registry, GameStore games, HttpContext http) =>
         {
-            // 未知玩法与 solve 端点口径一致：404（其余请求校验才是 400）
+            // 未知玩法与 solve 端点口径一致：404；已导入未接入的玩法给可操作的 409
+            var (_, problem) = GameAccess.Resolve(req.GameId, games, registry);
+            if (problem is not null) return problem;
             if (string.IsNullOrWhiteSpace(req.GameId) || !registry.TryGet(req.GameId, out _))
             {
                 return Results.NotFound(new { message = $"未知玩法：{req.GameId}" });
@@ -64,8 +66,10 @@ public static class GenerationEndpoints
 
         // 发起：202 + 任务号（请求校验错误也落成任务终态，不阻塞调用方）
         app.MapPost("/api/generate/jobs", (GenerateRequestDto req, GenerationJobService jobs,
-            LevelForge.Platform.Facades.GameRegistry registry) =>
+            LevelForge.Platform.Facades.GameRegistry registry, GameStore games) =>
         {
+            var (_, problem) = GameAccess.Resolve(req.GameId, games, registry);
+            if (problem is not null) return problem;
             if (string.IsNullOrWhiteSpace(req.GameId) || !registry.TryGet(req.GameId, out _))
             {
                 return Results.NotFound(new { message = $"未知玩法：{req.GameId}" });

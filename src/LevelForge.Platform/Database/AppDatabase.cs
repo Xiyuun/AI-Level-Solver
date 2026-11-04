@@ -35,17 +35,38 @@ public sealed class AppDatabase
         return conn;
     }
 
-    // 建表（幂等）+ 版本标记；首次启动自动完成，无需手工迁移
+    // 建表（幂等）+ 结构迁移；首次启动自动完成，无需手工迁移
     public void Initialize()
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = string.Join("\n", SchemaDdl);
         cmd.ExecuteNonQuery();
-        using var version = conn.CreateCommand();
-        // user_version=1：当前结构版本；后续演进在此分支迁移
-        version.CommandText = "PRAGMA user_version=1";
-        version.ExecuteNonQuery();
+        Migrate(conn);
+    }
+
+    // 结构迁移：按 user_version 递进（幂等；每级迁移只在该版本未应用时执行）
+    private static void Migrate(SqliteConnection conn)
+    {
+        using var read = conn.CreateCommand();
+        read.CommandText = "PRAGMA user_version";
+        var current = (long)read.ExecuteScalar()!;
+
+        if (current < 2)
+        {
+            // v2（三轮 N10 导入项目）：games 记录项目根目录与引擎类型。
+            // 可空列：静态注册玩法（sokoban-toy）这两列为 NULL，只有导入的项目才填
+            using var m = conn.CreateCommand();
+            m.CommandText = """
+                ALTER TABLE games ADD COLUMN project_root TEXT;
+                ALTER TABLE games ADD COLUMN engine_type TEXT;
+                """;
+            m.ExecuteNonQuery();
+        }
+
+        using var set = conn.CreateCommand();
+        set.CommandText = "PRAGMA user_version=2";
+        set.ExecuteNonQuery();
     }
 
     // 表数量（测试用：全部表已建立）

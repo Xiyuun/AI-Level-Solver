@@ -1,4 +1,5 @@
 using LevelForge.Platform.Batch;
+using LevelForge.Platform.Database;
 using LevelForge.Platform.Facades;
 
 namespace LevelForge.Platform.Api;
@@ -11,8 +12,10 @@ public static class BatchEndpoints
     {
         // 发起批量任务
         app.MapPost("/api/batch/start", async (BatchRequestDto req, BatchService batch,
-            GameRegistry registry, HttpContext http) =>
+            GameRegistry registry, GameStore games, HttpContext http) =>
         {
+            var (_, problem) = GameAccess.Resolve(req.GameId, games, registry);
+            if (problem is not null) return problem;
             if (string.IsNullOrWhiteSpace(req.GameId) || !registry.TryGet(req.GameId, out _))
             {
                 return Results.NotFound(new { message = $"未知玩法：{req.GameId}" });

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using LevelForge.Platform.Database;
 using LevelForge.Platform.Facades;
 
 namespace LevelForge.Platform.Api;
@@ -24,19 +25,21 @@ public static class PlayEndpoints
     public static void Map(IEndpointRouteBuilder app)
     {
         // 开局：加载关卡 → 初始快照 + 合法动作
-        app.MapPost("/api/play/start", (PlayStepRequestDto req, GameRegistry registry) =>
-            Handle(registry, req.GameId, req.LevelJson, []));
+        app.MapPost("/api/play/start", (PlayStepRequestDto req, GameRegistry registry, GameStore games) =>
+            Handle(registry, games, req.GameId, req.LevelJson, []));
 
         // 步进：带完整动作序列重放到当前局（每步请求都从初态执行，天然可回退——前端减序列即可）
-        app.MapPost("/api/play/step", (PlayStepRequestDto req, GameRegistry registry) =>
-            Handle(registry, req.GameId, req.LevelJson, req.Moves ?? []));
+        app.MapPost("/api/play/step", (PlayStepRequestDto req, GameRegistry registry, GameStore games) =>
+            Handle(registry, games, req.GameId, req.LevelJson, req.Moves ?? []));
     }
 
     #region 内部工具
 
     // 统一处理：玩法/关卡校验 → 门面执行 → 序列化
-    private static IResult Handle(GameRegistry registry, string? gameId, string? levelJson, JsonArray? moves)
+    private static IResult Handle(GameRegistry registry, GameStore games, string? gameId, string? levelJson, JsonArray? moves)
     {
+        var resolved = GameAccess.Resolve(gameId, games, registry);
+        if (resolved.Problem is not null) return resolved.Problem;
         if (string.IsNullOrWhiteSpace(gameId) || !registry.TryGet(gameId, out var facade))
         {
             return Results.NotFound(new { message = $"未知玩法：{gameId}" });

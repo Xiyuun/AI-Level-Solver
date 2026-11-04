@@ -94,11 +94,12 @@ public sealed class ComposerTests
     }
 
     [Fact]
-    public void token预算_稠密玩法高于玩具玩法()
+    public void token预算_各玩法都不低于安全下限()
     {
-        // 滑动猪稠密关 ≈3600 token，玩具关几十 token：预算必须按玩法给
+        // 三轮 N2 后滑动猪改意图级出题（输出变小，预算与玩具趋同）；此测试退守下限：
+        // 任何玩法的 token 预算都必须 ≥2048（JSON 结构 + 一次修复重写的余量），防止调参时把预算调穿底
         var pig = new SlidePigFacade();
-        Assert.True(pig.EstimateLevelTokens("500") > Facade.EstimateLevelTokens("11"),
-            "稠密关的 token 预算应高于玩具关");
+        Assert.True(pig.EstimateLevelTokens("500") >= 2048, "滑动猪 token 预算不应低于 2048");
+        Assert.True(Facade.EstimateLevelTokens("11") >= 2048, "玩具推箱子 token 预算不应低于 2048");
     }
 }

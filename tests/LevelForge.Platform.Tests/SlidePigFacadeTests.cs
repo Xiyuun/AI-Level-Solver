@@ -48,16 +48,14 @@ public class SlidePigFacadeTests
             .Concat(report.Purity.Issues).Concat(report.Determinism.Issues)));
     }
 
-    // API 集成：玩法列表出现 slide-pig（试用态），关卡不随仓库分发（内置为空）
+    // 三轮移除守卫（2026-11-04）：slide-pig 已退出静态注册表——真实 PiggyFarm 改走「导入项目」流程，
+    // 平台玩法列表里不应再出现内置滑动猪；门面源码保留作为 piggyfarm 适配层的参考实现
     [Fact]
-    public async Task 注册表_滑动猪为试用态()
+    public async Task 注册表_滑动猪已移除()
     {
         using var factory = new PlatformFactory();
         using var client = factory.CreateClient();
         var games = await client.GetFromJsonAsync<JsonElement[]>("/api/games");
-        var slidePig = games!.First(g => g.GetProperty("gameId").GetString() == "slide-pig");
-        // 2026-11-03 转正：三门+人工审核完成后注册为生产中
-        Assert.Equal("production", slidePig.GetProperty("status").GetString());
-        Assert.True(slidePig.GetProperty("gate2Applicable").GetBoolean());   // 有真机本体：门2适用
+        Assert.DoesNotContain(games!, g => g.GetProperty("gameId").GetString() == "slide-pig");
     }
 }

@@ -17,6 +17,8 @@ public static class SolveEndpoints
         // 单关求解：levelId（存量关）或 levelJson（质检粘贴）二选一
         app.MapPost("/api/solve", (SolveRequestDto req, GameRegistry registry, GameStore games, SolveRunStore runs, TapeStore tapes) =>
         {
+            var resolved = GameAccess.Resolve(req.GameId, games, registry);
+            if (resolved.Problem is not null) return resolved.Problem;
             if (string.IsNullOrWhiteSpace(req.GameId) || !registry.TryGet(req.GameId, out var facade))
             {
                 return Results.NotFound(new { message = $"未知玩法：{req.GameId}" });
