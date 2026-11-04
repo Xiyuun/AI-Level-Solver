@@ -40,6 +40,12 @@ public sealed class GenerationJob
     public CancellationToken Token => _cts.Token;
     public object SyncRoot => _lock;
 
+    // 收口那一刻的耗时；未收口为 null（快照据此冻结时长——否则已完成的任务耗时仍会随时间增长）
+    private long? _finishedElapsedMs;
+
+    // 对外可见的耗时：运行中取实时时钟，收口后取冻结值
+    private long VisibleElapsedMs => _finishedElapsedMs ?? Clock.ElapsedMilliseconds;
+
     // 推一条事件：先入缓冲，再扇出给在线订阅者
     public void Emit(GenerationProgress progress)
     {
@@ -56,7 +62,7 @@ public sealed class GenerationJob
         }
     }
 
-    // 收口：写终态、推一条终态事件、关闭所有订阅流
+    // 收口：冻结耗时、写终态、关闭所有订阅流
     public void Complete(string status, GenerationRunSummary? run, string? error)
     {
         List<Channel<GenerationEvent>> subs;
@@ -65,6 +71,7 @@ public sealed class GenerationJob
             Status = status;
             Run = run;
             Error = error;
+            _finishedElapsedMs ??= Clock.ElapsedMilliseconds;   // 幂等：重复收口不覆盖首次
             subs = [.. _subscribers];
             _subscribers.Clear();
         }
@@ -138,7 +145,7 @@ public sealed class GenerationJob
     {
         lock (_lock)
         {
-            return new GenerationJobSnapshot(JobId, Status, Clock.ElapsedMilliseconds, [.. _events], Run, Error);
+            return new GenerationJobSnapshot(JobId, Status, VisibleElapsedMs, [.. _events], Run, Error);
         }
     }
 }

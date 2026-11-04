@@ -174,4 +174,20 @@ public sealed class GenerationJobTests
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
+
+    // 收口后耗时必须冻结——否则已失败/已完成的任务在页面上显示的时长会一直涨
+    [Fact]
+    public void 任务收口后耗时冻结()
+    {
+        var job = new Generation.GenerationJob(
+            99, new Generation.GenerationRequest("sokoban-toy", 1),
+            System.Diagnostics.Stopwatch.StartNew());
+        Thread.Sleep(30);
+        Assert.True(job.Snapshot().ElapsedMs >= 25, "运行中应反映实时耗时");
+
+        job.Complete("failed", null, "测试收口");
+        var frozen = job.Snapshot().ElapsedMs;
+        Thread.Sleep(60);
+        Assert.Equal(frozen, job.Snapshot().ElapsedMs);
+    }
 }
