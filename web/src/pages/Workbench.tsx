@@ -413,10 +413,16 @@ export function Workbench({ game, detail }: { game: GameSummary; detail: GameDet
         {/* 右列：结果区（空态/成功态/失败态三选一 §2） */}
         <div className="wb-right">
           {phase === 'idle' && !qcResult && (
-            <div className="empty big-empty">
-              {mode === 'generate'
-                ? '选择难度与要求，点"生成"——LLM 出题、求解器验题，候选迭代过程在左侧日志可见'
-                : '粘贴关卡 JSON，先验可解性再决定是否采纳'}
+            <div className="stage-empty">
+              <div className="stage-empty-art">{mode === 'generate' ? '✦' : '⌕'}</div>
+              <div className="stage-empty-title">
+                {mode === 'generate' ? '还没有生成结果' : '粘贴一道关卡，先验可解性'}
+              </div>
+              <div className="stage-empty-hint">
+                {mode === 'generate'
+                  ? '选好难度与要求，点左侧「生成」——模型出题、求解器判卷、难度评分，每一步的实时进度会显示在这里。'
+                  : '支持项目原生格式（零转换直解）。有解会给出最短解法与逐步回放，无解只在模型内穷尽证明时标记。'}
+              </div>
             </div>
           )}
 

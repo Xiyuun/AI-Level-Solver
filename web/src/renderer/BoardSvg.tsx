@@ -50,9 +50,10 @@ export function BoardSvg(props: BoardSvgProps) {
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
-      width={width}
-      height={height}
-      style={{ background: palette.surface, borderRadius: 8 }}
+      // 尺寸自适应：viewBox 保留逻辑坐标系，实际渲染交给容器等比缩放
+      // （原来写死 width/height = 格数×48px，滑动猪 24×32 的地图会渲染成 1152×1536，直接撑爆页面）
+      preserveAspectRatio="xMidYMid meet"
+      style={{ background: palette.surface, borderRadius: 8, width: '100%', height: '100%', maxWidth: '100%', maxHeight: '100%', display: 'block' }}
       role="img"
     >
       {mapping.board?.grid !== false && <GridLines width={scene.width} height={scene.height} cell={cell} palette={palette} />}

@@ -1,9 +1,10 @@
-// 应用壳：顶栏玩法切换 + 三页签（工作台 / 接入向导 / 设置）
+// 应用壳：顶栏玩法切换 + 三页签（工作台 / 接入向导 / 设置）+ 主题落地
 import { useCallback, useEffect, useState } from 'react'
-import { activateGame, getGame, listGames, type GameDetail, type GameSummary } from './api/client'
+import { activateGame, getGame, getSettings, listGames, type GameDetail, type GameSummary } from './api/client'
 import { Onboarding } from './pages/Onboarding'
 import { Settings } from './pages/Settings'
 import { Workbench } from './pages/Workbench'
+import { applyTheme, resolveTheme, ThemeContext, type Theme } from './state/theme'
 
 type Tab = 'workbench' | 'onboarding' | 'settings'
 
@@ -13,6 +14,24 @@ export function App() {
   const [activeGame, setActiveGame] = useState('')
   const [detail, setDetail] = useState<GameDetail | null>(null)
   const [error, setError] = useState('')
+  const [theme, setTheme] = useState<Theme>('light')
+
+  // 主题：设置页存 ui.theme，这里读出来写到 <html data-theme>
+  // （此前 render 里写的是 theme-${String('')}，主题永远等于空串，设置页那个下拉框从来没生效过）
+  const refreshTheme = useCallback(async () => {
+    try {
+      const settings = await getSettings()
+      const next: Theme = resolveTheme(settings['ui.theme'])
+      setTheme(next)
+      applyTheme(next)
+    } catch {
+      // 读不到就维持当前主题：主题不该阻断主流程
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshTheme()
+  }, [refreshTheme])
 
   const refreshGames = useCallback(async () => {
     try {
@@ -61,43 +80,45 @@ export function App() {
   const current = games.find((g) => g.gameId === activeGame) ?? null
 
   return (
-    <div className={`app theme-${String('')}`}>
-      <header className="topbar">
-        <span className="brand">LevelForge</span>
-        <select
-          value={activeGame}
-          onChange={(e) => {
-            const gameId = e.target.value
-            setActiveGame(gameId)
-            void activateGame(gameId).catch((err) => setError((err as Error).message))
-          }}
-        >
-          {games.map((g) => (
-            <option key={g.gameId} value={g.gameId}>
-              {g.displayName}（{g.statusName}）
-            </option>
-          ))}
-        </select>
-        <nav className="tabs">
-          <button className={tab === 'workbench' ? 'active' : ''} onClick={() => setTab('workbench')}>工作台</button>
-          <button className={tab === 'onboarding' ? 'active' : ''} onClick={() => setTab('onboarding')}>接入向导</button>
-          <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>设置</button>
-        </nav>
-      </header>
+    <ThemeContext.Provider value={theme}>
+      <div className="app">
+        <header className="topbar">
+          <span className="brand">LevelForge</span>
+          <select
+            value={activeGame}
+            onChange={(e) => {
+              const gameId = e.target.value
+              setActiveGame(gameId)
+              void activateGame(gameId).catch((err) => setError((err as Error).message))
+            }}
+          >
+            {games.map((g) => (
+              <option key={g.gameId} value={g.gameId}>
+                {g.displayName}（{g.statusName}）
+              </option>
+            ))}
+          </select>
+          <nav className="tabs">
+            <button className={tab === 'workbench' ? 'active' : ''} onClick={() => setTab('workbench')}>工作台</button>
+            <button className={tab === 'onboarding' ? 'active' : ''} onClick={() => setTab('onboarding')}>接入向导</button>
+            <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>设置</button>
+          </nav>
+        </header>
 
-      {error && <div className="error">{error}</div>}
+        {error && <div className="error">{error}</div>}
 
-      {current && detail ? (
-        tab === 'workbench' ? (
-          <Workbench game={current} detail={detail} />
-        ) : tab === 'onboarding' ? (
-          <Onboarding game={current} detail={detail} onStatusChanged={() => void refreshAll()} />
+        {current && detail ? (
+          tab === 'workbench' ? (
+            <Workbench game={current} detail={detail} />
+          ) : tab === 'onboarding' ? (
+            <Onboarding game={current} detail={detail} onStatusChanged={() => void refreshAll()} />
+          ) : (
+            <Settings onGamesChanged={() => void refreshAll()} onThemeChanged={() => void refreshTheme()} />
+          )
         ) : (
-          <Settings onGamesChanged={() => void refreshAll()} />
-        )
-      ) : (
-        !error && <div className="empty big-empty">加载玩法详情…</div>
-      )}
-    </div>
+          !error && <div className="empty big-empty">加载玩法详情…</div>
+        )}
+      </div>
+    </ThemeContext.Provider>
   )
 }

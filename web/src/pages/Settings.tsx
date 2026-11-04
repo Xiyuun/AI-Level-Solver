@@ -8,8 +8,9 @@ import {
   type GameSummary,
 } from '../api/client'
 import { PhrasePicker } from '../components/PhrasePicker'
+import { applyTheme, resolveTheme } from '../state/theme'
 
-export function Settings({ onGamesChanged }: { onGamesChanged: () => void }) {
+export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: () => void; onThemeChanged: () => void }) {
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
@@ -53,6 +54,7 @@ export function Settings({ onGamesChanged }: { onGamesChanged: () => void }) {
         'ui.theme': theme,
       })
       setMessage('已保存（本地存储，仅本实例可见）')
+      onThemeChanged()   // 主题改动立即生效，不用刷新页面
     } catch (e) {
       setError((e as Error).message)
     }
@@ -116,10 +118,18 @@ export function Settings({ onGamesChanged }: { onGamesChanged: () => void }) {
 
       <section className="settings-section">
         <h4>主题</h4>
-        <select value={theme} onChange={(e) => setTheme(e.target.value)}>
+        <select
+          value={theme}
+          onChange={(e) => {
+            setTheme(e.target.value)
+            // 立即预览：切换即生效，点保存才落库（不落库就下次刷新回到旧主题）
+            applyTheme(resolveTheme(e.target.value))
+          }}
+        >
           <option value="light">亮色</option>
           <option value="dark">暗色</option>
         </select>
+        <div className="note">主题改动即时预览，点「保存」后持久化到本实例设置。</div>
       </section>
 
       <section className="settings-section">

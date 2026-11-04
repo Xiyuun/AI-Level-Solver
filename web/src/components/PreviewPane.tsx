@@ -1,5 +1,5 @@
 // 预览区：同一棋盘上"解法回放 ⇄ 试玩"互斥切换（§4 设计决定 #5：切换即重置局面）
-// 回放=播放/单步/重置+步数（磁带帧驱动）；试玩=点合法动作步进（后端步进 API，与求解同一份适配层）
+// 回放=播放/单步/时间轴/倍速（磁带帧驱动）；试玩=点合法动作步进（后端步进 API，与求解同一份适配层）
 // 边界提示（§4 预览防线）：模型内通关≠游戏执行通过，确认状态另列
 import { useEffect, useMemo, useState } from 'react'
 import type { PlayState } from '../api/client'
@@ -7,6 +7,10 @@ import { playStart, playStep } from '../api/client'
 import { BoardSvg } from '../renderer/BoardSvg'
 import { frameAt, framesOf } from '../renderer/tween'
 import type { SceneSnapshot, SolutionTapeMirror, VisualMapping } from '../renderer/model'
+import { useTheme } from '../state/theme'
+
+// 倍速档位：0.5× 慢放看细节，2× 快速扫一遍
+const SPEEDS = [0.5, 1, 2]
 
 export function PreviewPane({
   gameId,
@@ -19,6 +23,7 @@ export function PreviewPane({
   tape: SolutionTapeMirror | null
   mapping: VisualMapping
 }) {
+  const theme = useTheme()
   const [mode, setMode] = useState<'replay' | 'play'>('replay')
   const [error, setError] = useState('')
 
@@ -35,23 +40,25 @@ export function PreviewPane({
   // ---- 回放子状态 ----
   const [progress, setProgress] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [speed, setSpeed] = useState(1)
   const frames = useMemo(() => (tape ? framesOf(tape) : []), [tape])
   const frame = frames.length > 0 ? frameAt(frames, progress) : null
 
   useEffect(() => {
     if (!playing || frames.length === 0) return
     const total = frames.length - 1
+    const step = 0.25 * speed
     const timer = window.setInterval(() => {
       setProgress((p) => {
         if (p >= total) {
           setPlaying(false)
           return total
         }
-        return p + 0.25
+        return Math.min(total, p + step)
       })
-    }, 120)
+    }, 120 / speed)
     return () => window.clearInterval(timer)
-  }, [playing, frames])
+  }, [playing, frames, speed])
 
   // ---- 试玩子状态 ----
   const [playState, setPlayState] = useState<PlayState | null>(null)
@@ -92,6 +99,7 @@ export function PreviewPane({
           return index === 0 ? '初始局面' : tape.steps[Math.min(index, tape.steps.length) - 1]?.moveText ?? ''
         })()
       : ''
+  const atEnd = frames.length > 0 && Math.round(progress) >= frames.length - 1
 
   return (
     <div className="preview-pane">
@@ -117,14 +125,28 @@ export function PreviewPane({
       {mode === 'replay' &&
         (frame ? (
           <>
-            <BoardSvg prev={frame.prev as SceneSnapshot | null} next={frame.next as SceneSnapshot} t={frame.t} mapping={mapping} />
-            <div className="controls">
-              <button onClick={() => setProgress(0)}>重置</button>
-              <button onClick={() => { setPlaying(false); setProgress((p) => Math.max(0, Math.round(p) - 1)) }}>单步↩</button>
-              <button onClick={() => setPlaying((v) => !v)} disabled={frames.length <= 1}>
-                {playing ? '暂停' : '播放'}
+            {/* 棋盘舞台：容器给约束，SVG 等比缩放——大图不再撑爆页面 */}
+            <div className="board-viewport">
+              <BoardSvg
+                prev={frame.prev as SceneSnapshot | null}
+                next={frame.next as SceneSnapshot}
+                t={frame.t}
+                mapping={mapping}
+                theme={theme}
+              />
+            </div>
+            <div className="player-bar">
+              <button onClick={() => { setPlaying(false); setProgress(0) }} title="回到初始">⏮</button>
+              <button onClick={() => { setPlaying(false); setProgress((p) => Math.max(0, Math.round(p) - 1)) }} title="上一步">◀</button>
+              <button className="primary" onClick={() => setPlaying((v) => !v)} disabled={frames.length <= 1}>
+                {playing ? '⏸ 暂停' : atEnd ? '↻ 重播' : '▶ 播放'}
               </button>
-              <button onClick={() => { setPlaying(false); setProgress((p) => Math.min(frames.length - 1, Math.round(p) + 1)) }}>单步↪</button>
+              <button onClick={() => { setPlaying(false); setProgress((p) => Math.min(frames.length - 1, Math.round(p) + 1)) }} title="下一步">▶</button>
+              <div className="speed-group">
+                {SPEEDS.map((s) => (
+                  <button key={s} className={speed === s ? 'active' : ''} onClick={() => setSpeed(s)}>{s}×</button>
+                ))}
+              </div>
               <input
                 type="range"
                 min={0}
@@ -133,20 +155,25 @@ export function PreviewPane({
                 value={progress}
                 onChange={(e) => { setPlaying(false); setProgress(Number(e.target.value)) }}
               />
-              <span>
-                第 {Math.round(progress)}/{frames.length - 1} 步 · {currentMoveText}
-              </span>
+              <span className="player-step">第 {Math.round(progress)}/{frames.length - 1} 步</span>
+              <span className="player-move">{currentMoveText}</span>
             </div>
           </>
         ) : (
-          <div className="empty">该候选无可回放磁带</div>
+          <div className="stage-empty">
+            <div className="stage-empty-art">▦</div>
+            <div className="stage-empty-title">该候选没有可回放的磁带</div>
+            <div className="stage-empty-hint">只有"模型内有解"的候选才会产出磁带；未知（预算耗尽）和无解没有可回放内容。</div>
+          </div>
         ))}
 
       {mode === 'play' && (
         <>
-          {playState && (
+          {playState ? (
             <>
-              <BoardSvg prev={null} next={playState.snapshot} t={1} mapping={mapping} />
+              <div className="board-viewport">
+                <BoardSvg prev={null} next={playState.snapshot} t={1} mapping={mapping} theme={theme} />
+              </div>
               {playState.isGoal ? (
                 <div className="goal-banner">🎉 在当前适配模型中通关（游戏执行确认状态另列）</div>
               ) : (
@@ -159,13 +186,17 @@ export function PreviewPane({
                   {playState.legalMoves.length === 0 && <span className="empty">无合法动作</span>}
                 </div>
               )}
-              <div className="controls">
+              <div className="player-bar">
                 <span>已走 {playState.movesExecuted} 步</span>
                 <button onClick={() => void startPlay()}>回到初始</button>
               </div>
             </>
+          ) : (
+            <div className="stage-empty">
+              <div className="stage-empty-title">试玩加载中…</div>
+              <div className="stage-empty-hint">正在用与求解器同一份适配层初始化局面。</div>
+            </div>
           )}
-          {!playState && <div className="empty">试玩加载中…</div>}
         </>
       )}
     </div>
