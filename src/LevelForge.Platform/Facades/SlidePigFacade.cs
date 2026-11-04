@@ -13,13 +13,14 @@ namespace LevelForge.Platform.Facades;
 // 滑动猪门面：包装 SlidePig 适配层（内部参考实现；规则矩阵见 SlidePigArtifacts）
 // 求解策略用 A*（适配层声明 IHeuristicAdapter：剩余非笼实体数；BFS 实测稠密关组合爆炸，见 PROGRESS 坑表）
 // 关卡数据不入仓库：内置关卡为空，110 关经向导/导入 API 从游戏项目目录原生导入（滑动猪仅内部，方案书 §8 脱敏要求）
-public sealed class SlidePigFacade : IGameFacade, ITokenBudgetHint
+// 坐标制出题（ILevelComposer）：模型只描述意图（头格+类型+朝向），脚印由代码按实测规则推导
+// （10097 只猪验证：矩形类 100% 遵循"头格沿朝向轴、向反向延伸"；Cage=5×5 整块、CageL=5×5 缺左上 3×3）
+public sealed class SlidePigFacade : IGameFacade, ITokenBudgetHint, ILevelComposer
 {
     public const string AdapterVersionValue = "0.1.0";   // 适配层版本（v1 核心子集：75/110 关）
 
-    // token 预算：稠密关单猪序列化约 40 token × 90 头 ≈ 3600，缺省 2048 必然截断（实测全灭原因）
-    // 这里给足 8192 上限；若模型仍写不出合法原生格式，属内容能力问题，由流水线如实报失败
-    public int EstimateLevelTokens(string? levelNumber) => 8192;
+    // token 预算：坐标制意图每猪约 25 token，30 只 ≈ 750 + 规格 ≈ 1200，2048 充足
+    public int EstimateLevelTokens(string? levelNumber) => 2048;
 
     // 纯逻辑无状态适配器：单例复用
     private static readonly SlidePigAdapter AdapterInstance = new();
@@ -259,7 +260,339 @@ public sealed class SlidePigFacade : IGameFacade, ITokenBudgetHint
         return new PlayState(AdapterInstance.Snapshot(state), legal, AdapterInstance.IsGoal(state), index);
     }
 
+    #region 坐标制出题（ILevelComposer；脚印推导规则经 10097 只猪数据验证）
+
+    // 出题规格：模型只描述意图（头格+类型+朝向），脚印由代码推导——实测背景：
+    // 让 glm-4-flash 手写 100 只猪的 occupiedCells，2/3 候选死于脚印重叠/越界（原生 JSON 模式实测）
+    public string CompositionSpec => """
+        # 出题输出格式（坐标意图制，务必遵守）
+
+        只输出一个 JSON 对象（不要输出 occupiedCells，脚印由系统按规则推导；不要任何解释）：
+        {"levelId":500,"width":12,"height":19,"pigs":[
+          {"id":1,"type":"Normal","facing":"Down","head":{"x":5,"y":12}},
+          {"id":2,"type":"Long","facing":"Left","head":{"x":8,"y":6}},
+          {"id":3,"type":"Cage","anchor":{"x":3,"y":4},"counter":5}
+        ]}
+
+        - width/height：棋盘尺寸（12×19 为标准，可 8~14 × 12~22）；坐标 x=列、y=行，原点左上；
+        - pigs[].type：Normal/Boom/Spring/Long/Lock（矩形猪，head=头格）或 Cage/CageL（铁笼，anchor=包围盒左上角）；
+        - facing：Up/Left/Down/Right（小象不允许 Up）；铁笼朝向固定 Up；
+        - 脚印规则（系统推导，你只需给头格/锚点）：
+          · Normal/Boom/Spring/Lock：2 格（头格+反向延伸 1 格）；Long：3 格（反向延伸 2 格）；
+          · SmallElephant：2×3 块（Down=2宽3高，Left/Right=3宽2高）；
+          · Cage：以 anchor 为左上的 5×5 整块；CageL：5×5 缺左上 3×3（保留右臂和底边）；
+        - 计数（可选 counter）：Boom=碰撞爆炸次数、Lock/Cage=解锁次数（不给则用默认值）；
+        - 约束：所有格必须在棋盘内；猪与猪脚印不得重叠（猪与铁笼重叠是允许的，表示被关住）；
+          铁笼 5×5 必须整体在棋盘内；
+        - 数量参考：难度 1 档 4~8 只、难度 2 档 8~16 只、难度 3 档 16~30 只（普通猪为主，特殊猪点缀）；
+        - 布局与阻挡关系由你按上文规则与难度要求设计——先想好哪些猪先出、哪些被挡。
+        """;
+
+    // 拼装：意图清单 → 原生关卡 JSON（脚印推导、计数默认、格式合法由代码保证）
+    // 兼容：模型若直接输出带 occupiedCells 的原生 pigs（照 few-shot 学的），按原生校验裁决——合法即接受
+    public ComposeResult Compose(string modelOutput, string? levelNumber)
+    {
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(modelOutput);
+        }
+        catch (JsonException ex)
+        {
+            return ComposeResult.Fail($"输出不是合法 JSON：{ex.Message}");
+        }
+        if (node is not JsonObject obj)
+        {
+            return ComposeResult.Fail("输出不是 JSON 对象");
+        }
+        // 原生格式直通：pigs 里已带 occupiedCells 就按原生校验裁决（合法即接受，非法照实报错）
+        var firstPig = obj["pigs"]?.AsArray().FirstOrDefault() as JsonObject;
+        if (firstPig?["occupiedCells"] is JsonArray)
+        {
+            var native = obj.ToJsonString();
+            var nativeErrors = FormatErrors(native);
+            return nativeErrors.Count == 0 ? ComposeResult.Ok(native) : ComposeResult.Fail(nativeErrors);
+        }
+
+        var errors = new List<string>();
+
+        // 尺寸：默认 12×19（标准棋盘）
+        var width = obj["width"]?.GetValue<int?>() ?? 12;
+        var height = obj["height"]?.GetValue<int?>() ?? 19;
+        if (width is < 8 or > 14) errors.Add($"width={width} 超出范围 8~14");
+        if (height is < 12 or > 22) errors.Add($"height={height} 超出范围 12~22");
+        if (errors.Count > 0)
+        {
+            return ComposeResult.Fail(errors);
+        }
+
+        // 逐猪推导脚印
+        var pigNodes = obj["pigs"]?.AsArray() ?? new JsonArray();
+        if (pigNodes.Count == 0)
+        {
+            errors.Add("pigs 为空——至少要设计 1 只猪");
+            return ComposeResult.Fail(errors);
+        }
+        var pigFootprint = new HashSet<string>();     // 猪脚印（猪与猪不得重叠）
+        var cageFootprint = new HashSet<string>();    // 铁笼脚印（笼与笼不得重叠；猪可入笼=被关住）
+        var pigsOut = new JsonArray();
+        var seenIds = new HashSet<int>();
+        for (var i = 0; i < pigNodes.Count; i++)
+        {
+            if (pigNodes[i] is not JsonObject p)
+            {
+                errors.Add($"pigs[{i}] 不是对象");
+                continue;
+            }
+            // id：模型给了就用，没给按序号补
+            var id = p["id"]?.GetValue<int?>() ?? i;
+            if (!seenIds.Add(id))
+            {
+                errors.Add($"猪 id={id} 重复");
+                continue;
+            }
+            var type = p["type"]?.GetValue<string>() ?? "";
+            var facing = p["facing"]?.GetValue<string>() ?? "Up";
+            var counter = p["counter"]?.GetValue<int?>();
+            var specialInfo = counter is { } c && type is "Boom" or "Lock" or "Cage" ? c.ToString() : "";
+
+            // 铁笼：anchor → 推导 5×5 形状
+            if (type is "Cage" or "CageL")
+            {
+                var anchor = ReadPoint(p["anchor"], $"pigs[{i}].anchor", errors);
+                if (anchor is not { } a) continue;
+                var cells = CageCells(a, type == "CageL");
+                // 笼整块在界内
+                foreach (var (x, y) in cells)
+                {
+                    if (x < 0 || x >= width || y < 0 || y >= height)
+                    {
+                        errors.Add($"铁笼 id={id} 脚印 ({x},{y}) 越界（5×5 必须整体在棋盘内）");
+                        break;
+                    }
+                }
+                var cageDup = false;
+                foreach (var (x, y) in cells)
+                {
+                    if (!cageFootprint.Add($"{x},{y}")) cageDup = true;
+                }
+                if (cageDup) errors.Add($"铁笼 id={id} 与其他铁笼重叠");
+                pigsOut.Add(new JsonObject
+                {
+                    ["id"] = id,
+                    ["facing"] = "Up",
+                    ["pigType"] = type,
+                    ["specialInfo"] = specialInfo,
+                    ["occupiedCells"] = CellsNode(cells),
+                });
+                continue;
+            }
+
+            // 矩形猪：head → 按朝向轴推导脚印
+            if (!SlidePigSupportedTypes.Contains(type))
+            {
+                errors.Add($"pigs[{i}] 类型 {type} 不在坐标制支持范围（Normal/Boom/Spring/Long/SmallElephant/Lock）");
+                continue;
+            }
+            if (type == "SmallElephant" && facing == "Up")
+            {
+                errors.Add($"猪 id={id} 小象不允许朝 Up（无数据验证），请改 Down");
+                continue;
+            }
+            var head = ReadPoint(p["head"], $"pigs[{i}].head", errors);
+            if (head is not { } h) continue;
+            var footprint = DeriveFootprint(type, facing, h);
+            var outOfBounds = false;
+            var pigDup = false;
+            foreach (var (x, y) in footprint)
+            {
+                if (x < 0 || x >= width || y < 0 || y >= height)
+                {
+                    errors.Add($"猪 id={id} 脚印 ({x},{y}) 越界");
+                    outOfBounds = true;
+                }
+                if (!pigFootprint.Add($"{x},{y}")) pigDup = true;
+            }
+            if (outOfBounds) continue;
+            if (pigDup)
+            {
+                errors.Add($"猪 id={id} 脚印与其他猪重叠——请调整头格位置");
+                continue;
+            }
+            pigsOut.Add(new JsonObject
+            {
+                ["id"] = id,
+                ["facing"] = facing,
+                ["pigType"] = type,
+                ["specialInfo"] = specialInfo,
+                ["occupiedCells"] = CellsNode(footprint),
+            });
+        }
+        if (errors.Count > 0)
+        {
+            return ComposeResult.Fail(errors);
+        }
+
+        // 组装原生关卡 JSON（levelId 来自请求参数；pigCount=pigs.length）
+        var levelId = int.TryParse(levelNumber, out var n) ? n : 1;
+        var native2 = new JsonObject
+        {
+            ["levelId"] = levelId,
+            ["levelName"] = $"gen-{levelId}",
+            ["mapWidth"] = width,
+            ["mapHeight"] = height,
+            ["pigCount"] = pigsOut.Count,
+            ["pigs"] = pigsOut,
+        };
+        var composed = native2.ToJsonString();
+        var finalErrors = FormatErrors(composed);
+        return finalErrors.Count == 0 ? ComposeResult.Ok(composed) : ComposeResult.Fail(finalErrors);
+    }
+
+    // few-shot 原生关卡 → 坐标意图（与 Compose 的输出格式一致，否则模型会照示例写原生格式）
+    // 含 CageL（不规则形状）的示例无法无损表达 → 返回 null 跳过该示例
+    public string? DescribeAsCoordinates(string levelJson)
+    {
+        (SlidePigLevel? Level, IReadOnlyList<string> Errors) parsed;
+        try
+        {
+            parsed = SlidePigValidator.ValidateJson(levelJson);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+        if (parsed.Level is null || parsed.Errors.Count > 0)
+        {
+            return null;
+        }
+        var level = parsed.Level;
+        var pigs = new JsonArray();
+        foreach (var p in level.Pigs)
+        {
+            // 非矩形猪（CageL）无法用 head/anchor 无损表达：跳过整个示例（保守但保证格式一致）
+            var bboxW = p.OccupiedCells.Max(c => c.X) - p.OccupiedCells.Min(c => c.X) + 1;
+            var bboxH = p.OccupiedCells.Max(c => c.Y) - p.OccupiedCells.Min(c => c.Y) + 1;
+            if (p.PigType == "CageL") return null;
+            var pigObj = new JsonObject { ["id"] = p.Id, ["type"] = p.PigType, ["facing"] = p.Facing };
+            if (p.PigType == "Cage")
+            {
+                // 笼：anchor = 5×5 包围盒左上（真实数据 100% 为 5×5 整块）
+                pigObj["anchor"] = new JsonObject { ["x"] = p.OccupiedCells.Min(c => c.X), ["y"] = p.OccupiedCells.Min(c => c.Y) };
+                if (!string.IsNullOrEmpty(p.SpecialInfo)) pigObj["counter"] = int.Parse(p.SpecialInfo.Trim());
+            }
+            else
+            {
+                // 头格 = 沿朝向最前的那格（脚印集中沿朝向轴的极值格）
+                var head = HeadCell(p.OccupiedCells, p.Facing);
+                pigObj["head"] = new JsonObject { ["x"] = head.X, ["y"] = head.Y };
+                if (!string.IsNullOrEmpty(p.SpecialInfo)) pigObj["counter"] = int.Parse(p.SpecialInfo.Trim());
+            }
+            pigs.Add(pigObj);
+            _ = (bboxW, bboxH);
+        }
+        return new JsonObject
+        {
+            ["levelId"] = level.LevelId,
+            ["width"] = level.MapWidth,
+            ["height"] = level.MapHeight,
+            ["pigs"] = pigs,
+        }.ToJsonString();
+    }
+
+    #endregion
+
     #region 内部工具
+
+    // 坐标制支持的矩形类型
+    private static readonly HashSet<string> SlidePigSupportedTypes =
+        ["Normal", "Boom", "Spring", "Long", "SmallElephant", "Lock"];
+
+    // 从意图 JSON 读 {x,y} 点
+    private static (int X, int Y)? ReadPoint(JsonNode? node, string name, List<string> errors)
+    {
+        if (node is not JsonObject o || o["x"] is null || o["y"] is null)
+        {
+            errors.Add($"缺少 {name}（{{x,y}}）");
+            return null;
+        }
+        return (o["x"]!.GetValue<int>(), o["y"]!.GetValue<int>());
+    }
+
+    // 头格推导：朝向轴上最"前"的格（Down/Right 取最大坐标，Up/Left 取最小）
+    private static (int X, int Y) HeadCell(IReadOnlyList<(int X, int Y)> cells, string facing)
+    {
+        var vertical = facing is "Up" or "Down";
+        var takeMax = facing is "Down" or "Right";
+        var best = cells[0];
+        foreach (var c in cells)
+        {
+            var v = vertical ? c.Y : c.X;
+            var b = vertical ? best.Y : best.X;
+            if (takeMax ? v > b : v < b) best = c;
+        }
+        return best;
+    }
+
+    // 脚印推导：头格沿朝向轴，向反向延伸（100% 数据验证：9359 矩形猪全匹配）
+    private static List<(int X, int Y)> DeriveFootprint(string type, string facing, (int X, int Y) head)
+    {
+        var (dx, dy) = facing switch
+        {
+            "Up" => (0, -1),
+            "Down" => (0, 1),
+            "Left" => (-1, 0),
+            _ => (1, 0)
+        };
+        var length = type == "Long" ? 3 : 2;
+        var cells = new List<(int X, int Y)>(length);
+        // 头在前、身体向反向延伸：脚印集合 = 头 + 反向 × i
+        if (type == "SmallElephant")
+        {
+            // 2×3 块：Down=2宽3高；Left/Right=3宽2高（Up 已在规格中禁止）
+            var w = facing is "Left" or "Right" ? 3 : 2;
+            var h = facing is "Left" or "Right" ? 2 : 3;
+            for (var x = 0; x < w; x++)
+            {
+                for (var y = 0; y < h; y++)
+                {
+                    cells.Add((head.X + x, head.Y + y));
+                }
+            }
+            return cells;
+        }
+        for (var i = 0; i < length; i++)
+        {
+            cells.Add((head.X - dx * i, head.Y - dy * i));
+        }
+        return cells;
+    }
+
+    // 铁笼脚印：anchor 为 5×5 左上；CageL 缺左上 3×3（保留右臂和底边；数据验证 6/6）
+    private static List<(int X, int Y)> CageCells((int X, int Y) anchor, bool lShape)
+    {
+        var cells = new List<(int X, int Y)>(lShape ? 16 : 25);
+        for (var x = 0; x < 5; x++)
+        {
+            for (var y = 0; y < 5; y++)
+            {
+                if (lShape && x < 3 && y < 3) continue;   // 缺左上 3×3
+                cells.Add((anchor.X + x, anchor.Y + y));
+            }
+        }
+        return cells;
+    }
+
+    // 脚印 → occupiedCells JSON
+    private static JsonArray CellsNode(IEnumerable<(int X, int Y)> cells)
+    {
+        var arr = new JsonArray();
+        foreach (var (x, y) in cells)
+        {
+            arr.Add(new JsonObject { ["x"] = x, ["y"] = y });
+        }
+        return arr;
+    }
 
     // JSON 层面即不可用：直接 Invalid（零 metrics），难度不适用
     private static PlatformSolve InvalidOutcome(string? runConfigHash, string message)
