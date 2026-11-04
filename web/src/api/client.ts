@@ -403,3 +403,58 @@ export interface LevelImportResult {
 
 export const importLevels = (gameId: string, directory: string) =>
   sendJson<LevelImportResult>(`/api/games/${gameId}/import-levels`, 'POST', { directory })
+
+// ---- 批量生产（表现层_批量生产）----
+
+export interface BatchItem {
+  levelNumber: number
+  status: string // pending|running|solved|failed|skipped
+  difficultyBand: number | null
+  solutionLength: number | null
+  generationRunId: number | null
+  failureSummary: string | null
+  elapsedMs: number
+}
+
+export interface BatchStatus {
+  taskId: number
+  gameId: string
+  status: string // running|completed|cancelled
+  total: number
+  completed: number
+  succeeded: number
+  failed: number
+  skipped: number
+  totalElapsedMs: number
+  items: BatchItem[]
+}
+
+export interface BatchStartRequest {
+  fromLevel: number
+  toLevel: number
+  difficulty1Count: number
+  difficulty2Count: number
+  difficulty3Count: number
+  specialRequirements?: string
+  concurrency?: number
+  candidateLimit?: number
+  solveTimeoutMs?: number
+}
+
+export const startBatch = (gameId: string, req: BatchStartRequest) =>
+  sendJson<BatchStatus>('/api/batch/start', 'POST', { gameId, ...req })
+
+export const getBatchStatus = (taskId: number) => getJson<BatchStatus>(`/api/batch/${taskId}/status`)
+
+export const cancelBatch = (taskId: number) =>
+  sendJson<{ message: string }>(`/api/batch/${taskId}/cancel`, 'POST').then(() => undefined)
+
+export const retryBatchFailed = (taskId: number) =>
+  sendJson<BatchStatus>(`/api/batch/${taskId}/retry`, 'POST')
+
+export const adoptBatch = (taskId: number, fromLevel: number, toLevel: number, overwrite = false) =>
+  sendJson<{ total: number; ok: number; failed: number; details: { levelNumber: number; ok: boolean; error: string | null }[] }>(
+    `/api/batch/${taskId}/adopt`, 'POST', { fromLevel, toLevel, overwrite })
+
+export const exportBatch = (taskId: number) =>
+  getJson<{ levelNumber: number; contentJson: string }[]>(`/api/batch/${taskId}/export`)

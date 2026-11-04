@@ -1,12 +1,13 @@
-// 应用壳：顶栏玩法切换 + 三页签（工作台 / 接入向导 / 设置）+ 主题落地
+// 应用壳：顶栏玩法切换 + 四页签（工作台 / 批量 / 接入向导 / 设置）+ 主题落地
 import { useCallback, useEffect, useState } from 'react'
 import { activateGame, getGame, getSettings, listGames, type GameDetail, type GameSummary } from './api/client'
+import { Batch } from './pages/Batch'
 import { Onboarding } from './pages/Onboarding'
 import { Settings } from './pages/Settings'
 import { Workbench } from './pages/Workbench'
 import { applyTheme, resolveTheme, ThemeContext, type Theme } from './state/theme'
 
-type Tab = 'workbench' | 'onboarding' | 'settings'
+type Tab = 'workbench' | 'batch' | 'onboarding' | 'settings'
 
 export function App() {
   const [tab, setTab] = useState<Tab>('workbench')
@@ -100,6 +101,7 @@ export function App() {
           </select>
           <nav className="tabs">
             <button className={tab === 'workbench' ? 'active' : ''} onClick={() => setTab('workbench')}>工作台</button>
+            <button className={tab === 'batch' ? 'active' : ''} onClick={() => setTab('batch')}>批量</button>
             <button className={tab === 'onboarding' ? 'active' : ''} onClick={() => setTab('onboarding')}>接入向导</button>
             <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>设置</button>
           </nav>
@@ -110,6 +112,8 @@ export function App() {
         {current && detail ? (
           tab === 'workbench' ? (
             <Workbench game={current} detail={detail} />
+          ) : tab === 'batch' ? (
+            <Batch game={current} />
           ) : tab === 'onboarding' ? (
             <Onboarding game={current} detail={detail} onStatusChanged={() => void refreshAll()} />
           ) : (
