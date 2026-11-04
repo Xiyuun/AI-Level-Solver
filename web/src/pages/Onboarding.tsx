@@ -12,7 +12,8 @@ import {
   type GameSummary,
   type OnboardingTask,
 } from '../api/client'
-import { REVIEW_CHECKLIST, allStepsDone, checklistComplete, stepTitle } from '../state/onboarding'
+import { REVIEW_CHECKLIST, allStepsDone, checklistComplete, groupGate3, stepTitle } from '../state/onboarding'
+import { ImportPanel } from '../components/ImportPanel'
 
 export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummary; detail: GameDetail; onStatusChanged: () => void }) {
   const [tasks, setTasks] = useState<OnboardingTask[]>([])
@@ -134,6 +135,9 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
     { name: '规则矩阵 rule-matrix', ok: detail.ruleMatrix.length > 0 },
   ]
 
+  // 门3 四区：红灯阻断转正，黄灯需人判，待确认是新关，一致是没变化（验证门 §5.2）
+  const gate3Zones = gate3 ? groupGate3(gate3.rows) : null
+
   return (
     <div className="onboarding">
       {message && <div className="ok-message">{message}</div>}
@@ -193,16 +197,32 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
               </li>
             ))}
           </ul>
+          {/* 历史关卡导入（产物 #3）：逐关三栏，跳过原因可导出 */}
+          <ImportPanel gameId={game.gameId} defaultDirectory={detail.levelsRoot} />
           <button onClick={() => void submitGate1()}>运行门1（五项合规检查）</button>
           {gate1 && (
-            <div className={`gate1-report ${gate1.passed ? 'ok' : 'bad'}`}>
-              <div>{gate1.passed ? '门1全绿（零豁免）' : '门1未通过：'}</div>
+            <div className="gate1-cards">
               {Object.entries(gate1.report ?? {}).map(([name, result]) => (
-                <div key={name} className="gate1-line">
-                  {result.passed ? '✓' : '✗'} {name}
-                  {result.issues.length > 0 && <span className="error-text"> {result.issues.join('；')}</span>}
+                <div key={name} className={`gate1-card ${result.passed ? 'ok' : 'bad'}`}>
+                  <div className="gate1-card-head">
+                    <span className="gate1-mark">{result.passed ? '✓' : '✗'}</span>
+                    <span className="gate1-name">{name}</span>
+                  </div>
+                  {result.issues.length > 0 && (
+                    <ul className="gate1-issues">
+                      {result.issues.map((issue) => (
+                        <li key={issue}>{issue}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {result.notes.length > 0 && (
+                    <div className="gate1-notes">{result.notes.join('；')}</div>
+                  )}
                 </div>
               ))}
+              <div className={`gate1-verdict ${gate1.passed ? 'ok' : 'bad'}`}>
+                {gate1.passed ? '门1 全绿（零豁免）' : '门1 未通过：上面 ✗ 的项就是待修的地方'}
+              </div>
             </div>
           )}
         </section>
@@ -253,20 +273,52 @@ export function Onboarding({ game, detail, onStatusChanged }: { game: GameSummar
               <button onClick={() => void promote('trial')}>先上试用档（trial，带"未经对拍"水印）</button>
             )}
             {allStepsDone(tasks) && game.status !== 'production' && (
-              <button className="primary" onClick={() => void promote('production')}>转正上线（production）</button>
+              <button
+                className="primary"
+                disabled={gate3Zones?.blocked ?? false}
+                title={gate3Zones?.blocked ? '门3 存在红灯，禁止转正' : undefined}
+                onClick={() => void promote('production')}
+              >
+                转正上线（production）
+              </button>
             )}
           </div>
-          {gate3 && (
-            <div className="gate3-summary">
-              <div>
-                共 {gate3.total} 关：match {gate3.matched} · <b className="bad-text">红灯 {gate3.red}</b> · 黄灯 {gate3.yellow} · 待确认 {gate3.newLevels}
+          {gate3Zones?.blocked && (
+            <div className="failure-advice">
+              存在 {gate3Zones.red.length} 个红灯关（{gate3Zones.red.slice(0, 6).join('、')}
+              {gate3Zones.red.length > 6 ? '…' : ''}）：结论发生变化，先修复规则差异或确认后更新基准，再重跑门3。
+              红灯未清时平台会拒绝转正。
+            </div>
+          )}
+          {gate3 && gate3Zones && (
+            <div className="gate3-zones">
+              <div className="gate3-zone zone-red">
+                <div className="gate3-zone-head">红灯 · 阻断转正<span>{gate3Zones.red.length}</span></div>
+                <ul>{gate3Zones.red.length === 0 ? <li className="note">无</li> : gate3Zones.red.map((id) => <li key={id}>{id}</li>)}</ul>
               </div>
-              {gate3.rows.filter((r) => r.verdict !== 'match').slice(0, 12).map((r) => (
+              <div className="gate3-zone zone-yellow">
+                <div className="gate3-zone-head">黄灯 · 需人判<span>{gate3Zones.yellow.length}</span></div>
+                <ul>{gate3Zones.yellow.length === 0 ? <li className="note">无</li> : gate3Zones.yellow.map((id) => <li key={id}>{id}</li>)}</ul>
+              </div>
+              <div className="gate3-zone zone-new">
+                <div className="gate3-zone-head">待确认 · 新关<span>{gate3Zones.fresh.length}</span></div>
+                <ul>{gate3Zones.fresh.length === 0 ? <li className="note">无</li> : gate3Zones.fresh.map((id) => <li key={id}>{id}</li>)}</ul>
+              </div>
+              <div className="gate3-zone zone-match">
+                <div className="gate3-zone-head">一致<span>{gate3Zones.match}</span></div>
+                <ul><li className="note">结论与基准相同</li></ul>
+              </div>
+            </div>
+          )}
+          {gate3 && (
+            <details className="gate3-notes">
+              <summary>逐关说明（{gate3.rows.filter((r) => r.verdict !== 'match').length} 条非一致）</summary>
+              {gate3.rows.filter((r) => r.verdict !== 'match').slice(0, 30).map((r) => (
                 <div key={r.levelId} className={`gate3-row verdict-${r.verdict}`}>
                   {r.levelId}：{r.verdict === 'red' ? '红灯' : r.verdict === 'yellow' ? '黄灯' : '待确认'} — {r.notes[0] ?? ''}
                 </div>
               ))}
-            </div>
+            </details>
           )}
         </section>
       </div>

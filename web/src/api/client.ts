@@ -374,5 +374,32 @@ export const runGate1 = (gameId: string) =>
 export const runGate3 = (gameId: string) =>
   sendJson<{
     recordId: number; total: number; matched: number; red: number; yellow: number; newLevels: number
-    rows: { levelId: string; verdict: string; status: string; notes: string[] }[]
+    rows: Gate3Row[]
   }>(`/api/games/${gameId}/gates/3/run`, 'POST')
+
+// 门3单关结论（四区展示用）
+export interface Gate3Row {
+  levelId: string
+  verdict: 'match' | 'red' | 'yellow' | 'new' | string
+  status: string
+  notes: string[]
+}
+
+// 关卡导入（原生格式目录批量入库；子集外类型如实跳过）
+export interface LevelImportEntry {
+  file: string
+  levelId: string | null
+  outcome: 'imported' | 'skipped' | 'failed' | string
+  reason: string | null
+}
+
+export interface LevelImportResult {
+  imported: number
+  skippedUnsupported: number
+  failed: number
+  entries: LevelImportEntry[]
+  messages: string[]
+}
+
+export const importLevels = (gameId: string, directory: string) =>
+  sendJson<LevelImportResult>(`/api/games/${gameId}/import-levels`, 'POST', { directory })

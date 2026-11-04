@@ -46,3 +46,28 @@ export function stepTitle(step: number): string {
   }
   return titles[step] ?? `步骤 ${step}`
 }
+
+// ---- 门3 四区（验证门 §5.2 diff 语义）----
+// 红灯=结论变了（阻断转正）；黄灯=路径/难度漂移（需人判）；待确认=新关；一致=无变化
+export interface Gate3Zones {
+  red: string[]       // 红灯关号
+  yellow: string[]    // 黄灯关号
+  fresh: string[]     // 待确认新关
+  match: number       // 一致关数
+  blocked: boolean    // 是否阻断转正（存在红灯）
+}
+
+// 按 verdict 分组；未知 verdict 归入黄灯（宁可人工看一眼，也不静默放过）
+export function groupGate3(rows: { levelId: string; verdict: string }[]): Gate3Zones {
+  const red: string[] = []
+  const yellow: string[] = []
+  const fresh: string[] = []
+  let match = 0
+  for (const row of rows) {
+    if (row.verdict === 'red') red.push(row.levelId)
+    else if (row.verdict === 'new') fresh.push(row.levelId)
+    else if (row.verdict === 'match') match++
+    else yellow.push(row.levelId)
+  }
+  return { red, yellow, fresh, match, blocked: red.length > 0 }
+}

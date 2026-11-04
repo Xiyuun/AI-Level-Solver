@@ -9,6 +9,7 @@ import {
 } from '../api/client'
 import { PhrasePicker } from '../components/PhrasePicker'
 import { applyTheme, resolveTheme } from '../state/theme'
+import { LLM_PRESETS, normalizeBaseUrl } from '../state/llmPresets'
 
 export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: () => void; onThemeChanged: () => void }) {
   const [baseUrl, setBaseUrl] = useState('')
@@ -16,6 +17,7 @@ export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: (
   const [model, setModel] = useState('')
   const [candidateLimit, setCandidateLimit] = useState(3)
   const [solveTimeout, setSolveTimeout] = useState(30000)
+  const [timeoutSeconds, setTimeoutSeconds] = useState(60)
   const [theme, setTheme] = useState('light')
   const [testResult, setTestResult] = useState<{ ok: boolean; latencyMs: number; error: string | null; replyPreview: string | null } | null>(null)
   const [games, setGames] = useState<GameSummary[]>([])
@@ -30,6 +32,7 @@ export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: (
       setModel(String(settings['llm.model'] ?? ''))
       setCandidateLimit(Number(settings['gen.candidateLimit'] ?? 3))
       setSolveTimeout(Number(settings['gen.solveTimeoutMs'] ?? 30000))
+      setTimeoutSeconds(Number(settings['llm.timeoutSeconds'] ?? 60))
       setTheme(String(settings['ui.theme'] ?? 'light'))
       setGames(list)
     } catch (e) {
@@ -46,9 +49,10 @@ export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: (
     setMessage('')
     try {
       await saveSettings({
-        'llm.baseUrl': baseUrl.trim(),
+        'llm.baseUrl': normalizeBaseUrl(baseUrl),
         'llm.apiKey': apiKey,
         'llm.model': model.trim(),
+        'llm.timeoutSeconds': timeoutSeconds,
         'gen.candidateLimit': candidateLimit,
         'gen.solveTimeoutMs': solveTimeout,
         'ui.theme': theme,
@@ -79,18 +83,49 @@ export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: (
 
       <section className="settings-section">
         <h4>LLM API（实例自带，OpenAI 兼容）</h4>
+        {/* 预设：工具只会拼 {地址}/chat/completions，所以这里填的是 OpenAI 兼容端点根地址 */}
+        <div className="preset-row">
+          <span className="note">快速填充：</span>
+          {LLM_PRESETS.map((preset) => (
+            <button
+              key={preset.name}
+              className="preset-btn"
+              title={`${preset.baseUrl} · ${preset.model}`}
+              onClick={() => {
+                setBaseUrl(preset.baseUrl)
+                setModel(preset.model)
+              }}
+            >
+              {preset.name}
+            </button>
+          ))}
+        </div>
         <label className="field">
-          地址
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
+          地址（工具自动拼 /chat/completions）
+          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.deepseek.com" />
         </label>
         <label className="field">
           API Key（明文存储于本机）
           <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" />
         </label>
         <label className="field">
-          模型
-          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="如 glm-4.7" />
+          模型（原样透传给服务端，以控制台列出的 id 为准）
+          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="deepseek-chat" />
         </label>
+        <label className="field">
+          单次调用超时（秒）
+          <input
+            type="number"
+            min={10}
+            max={300}
+            value={timeoutSeconds}
+            onChange={(e) => setTimeoutSeconds(Number(e.target.value) || 60)}
+          />
+        </label>
+        <div className="note">
+          快模型（flash 类）30~60s 够用；带思考链的模型生成密集关卡 JSON 时可能要 120s 以上。
+          超时只影响单次模型调用，不影响求解器。
+        </div>
         <div className="form-actions">
           <button className="primary" onClick={() => void save()}>保存</button>
           <button onClick={() => void test()}>测试连接</button>

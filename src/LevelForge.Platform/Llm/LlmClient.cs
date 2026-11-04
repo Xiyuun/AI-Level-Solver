@@ -17,18 +17,21 @@ public sealed record ChatResult(
     bool Ok, string Content, string? Error, long LatencyMs, int? PromptTokens, int? CompletionTokens);
 
 // LLM 连接三件套：从设置解析（实例自带，明文本地）
-public sealed record LlmConfig(string BaseUrl, string ApiKey, string Model)
+// TimeoutSeconds：单次调用超时。快模型（flash 类）30s 够；强模型生成长 JSON 或带思考时会超，
+// 所以做成实例设置项（设置页可调），默认 60s
+public sealed record LlmConfig(string BaseUrl, string ApiKey, string Model, int TimeoutSeconds = 60)
 {
     // 可用判定：地址与模型必填，key 视服务端要求可空
     public bool IsConfigured => !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(Model);
 
-    // 从设置读取（缺省空串）
+    // 从设置读取（缺省空串 / 60s）
     public static LlmConfig Resolve(SettingsStore settings)
     {
         return new LlmConfig(
             settings.Get<string>("llm.baseUrl", "") ?? "",
             settings.Get<string>("llm.apiKey", "") ?? "",
-            settings.Get<string>("llm.model", "") ?? "");
+            settings.Get<string>("llm.model", "") ?? "",
+            Math.Clamp(settings.Get("llm.timeoutSeconds", 60), 10, 300));
     }
 }
 
@@ -36,7 +39,6 @@ public sealed record LlmConfig(string BaseUrl, string ApiKey, string Model)
 // 密钥只在本地 settings 明文存取；调用失败一律转为结论返回，不向调用方抛异常（用户取消除外）
 public sealed class LlmClient
 {
-    private const int CallTimeoutSeconds = 30;   // 单次调用超时（生成端出题分析 §5）
     private const int DefaultMaxTokens = 8192;   // 缺省输出上限：稠密玩法单关 JSON 可达数千 token，2048 会必然截断
 
     // 请求体序列化：宽松编码——中文提示词不转义成 \uXXXX（流量可读、日志可断言）
@@ -123,7 +125,7 @@ public sealed class LlmClient
                 request.Headers.Authorization = new("Bearer", config.ApiKey);
             }
             using var cancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cancel.CancelAfter(TimeSpan.FromSeconds(CallTimeoutSeconds));
+            cancel.CancelAfter(TimeSpan.FromSeconds(config.TimeoutSeconds));
             using var response = await _http.SendAsync(request, cancel.Token);
             var latency = sw.ElapsedMilliseconds;
             if (!response.IsSuccessStatusCode)
@@ -154,7 +156,7 @@ public sealed class LlmClient
             {
                 throw;   // 用户取消向上传播，由流水线标记运行取消
             }
-            return new ChatResult(false, "", $"调用超时（{CallTimeoutSeconds}s）", sw.ElapsedMilliseconds, null, null);
+            return new ChatResult(false, "", $"调用超时（{config.TimeoutSeconds}s）", sw.ElapsedMilliseconds, null, null);
         }
         catch (Exception ex)
         {

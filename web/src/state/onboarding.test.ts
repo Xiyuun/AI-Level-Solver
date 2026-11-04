@@ -1,7 +1,7 @@
 // 接入向导纯逻辑测试：清单完备性 / 六步完成度 / 勾选完成判定
 import { describe, expect, it } from 'vitest'
 import type { OnboardingTask } from '../api/client'
-import { REVIEW_CHECKLIST, allStepsDone, checklistComplete } from './onboarding'
+import { REVIEW_CHECKLIST, allStepsDone, checklistComplete, groupGate3 } from './onboarding'
 
 function task(step: number, status: string): OnboardingTask {
   return { step, title: `step${step}`, status, detail: null, updatedAt: '' }
@@ -37,5 +37,29 @@ describe('清单勾选完成', () => {
     const all = Array.from({ length: 13 }, (_, i) => i + 1)
     expect(checklistComplete(all)).toBe(true)
     expect(checklistComplete(all.slice(0, 12))).toBe(false)
+  })
+})
+
+describe('门3 四区分组', () => {
+  const rows = (verdicts: string[]) => verdicts.map((verdict, i) => ({ levelId: String(i + 1), verdict }))
+
+  it('按 verdict 分到四个区', () => {
+    const zones = groupGate3(rows(['red', 'yellow', 'new', 'match', 'match']))
+    expect(zones.red).toEqual(['1'])
+    expect(zones.yellow).toEqual(['2'])
+    expect(zones.fresh).toEqual(['3'])
+    expect(zones.match).toBe(2)
+  })
+
+  it('存在红灯即阻断转正', () => {
+    expect(groupGate3(rows(['red', 'match'])).blocked).toBe(true)
+    expect(groupGate3(rows(['match', 'yellow', 'new'])).blocked).toBe(false)
+    expect(groupGate3([]).blocked).toBe(false)
+  })
+
+  it('未知 verdict 归入黄灯（宁可人工看一眼，不静默放过）', () => {
+    const zones = groupGate3(rows(['something-new']))
+    expect(zones.yellow).toEqual(['1'])
+    expect(zones.blocked).toBe(false)
   })
 })

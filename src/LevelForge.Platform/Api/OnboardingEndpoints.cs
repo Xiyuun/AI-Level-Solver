@@ -44,12 +44,26 @@ public static class OnboardingEndpoints
         });
 
         // 玩法状态变更（分级接入 §5：试用档先行、转正档补验；上线注册/回退）
-        app.MapPost("/api/games/{gameId}/status", (string gameId, GameStatusRequestDto body, OnboardingStore onboarding) =>
+        // 转正门禁（验证门 §5.3/§6）：最新一次门3 存在红灯时禁止转正——
+        // 红灯=结论发生了未解释的变化，此时上线等于把不确定性直接推给玩家
+        app.MapPost("/api/games/{gameId}/status", (string gameId, GameStatusRequestDto body,
+            OnboardingStore onboarding, VerificationRecordStore records) =>
         {
             if (body.Status is null ||
                 body.Status is not (GameStatus.Onboarding or GameStatus.Trial or GameStatus.Production))
             {
                 return Results.BadRequest(new { message = "状态必须是 onboarding/trial/production" });
+            }
+            if (body.Status == GameStatus.Production)
+            {
+                var latestGate3 = records.List(gameId, "gate3").FirstOrDefault();
+                if (latestGate3 is { Verdict: "fail" })
+                {
+                    return Results.Conflict(new
+                    {
+                        message = "门3 最新一次全量回归存在红灯，禁止转正：先修复规则差异，或确认后更新基准再重跑门3",
+                    });
+                }
             }
             if (!onboarding.UpdateGameStatus(gameId, body.Status))
             {
