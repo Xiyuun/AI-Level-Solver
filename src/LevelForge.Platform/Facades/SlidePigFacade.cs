@@ -33,26 +33,63 @@ public sealed class SlidePigFacade : IGameFacade, ITokenBudgetHint
     private const int DensePigThreshold = 40;
     private static readonly AStarSolver<SlidePigLevel, SlidePigState, SlidePigMove> OptimalStrategy = new();
 
-    // 稠密关求解（实例方法：收尾要用 Registration.AdapterHash）：机动性排序 + 腾挪预算阶梯（8→16→32，预算平分）
+    // 稠密关求解（实例方法：收尾要用 Registration.AdapterHash）
+    // 策略阶梯（M1 实测 75 关：束搜索 W=64 在 44 个"贪心 30s 未解"关里解出 22 个，多为 1~3s；
+    // 但束搜索会漏掉 4 个贪心能解的关，W=256 只多解 1 关且吃满预算——所以三级都要，按剩余预算动态分配）：
+    //   ① 束搜索 W=64（主力）：命中率最高、最快
+    //   ② 束搜索 W=256（加宽）：处理窄束枯竭的关，代价高，只给它剩余预算的一部分
+    //   ③ 贪心 DFS 腾挪阶梯（兜底）：束宽剪枝可能正好剪掉唯一可行路径
+    // 全程失败则如实报预算耗尽（未知），绝不冒充无解
     private PlatformSolve SolveDense(
         AdapterBundle<SlidePigLevel, SlidePigState, SlidePigMove> bundle, SlidePigLevel level, SolveCommand command, string? runConfigHash)
     {
         var totalMs = (long)(command.TimeBudget?.TotalMilliseconds ?? 30_000);
-        var tiers = new[] { 8, 16, 32 };
-        var tierMs = Math.Max(1000, totalMs / tiers.Length);
         var budget = command.NodeBudget;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        // 剩余预算（保底 400ms，避免退化为 0 预算空转）
+        long Remaining() => Math.Max(400, totalMs - sw.ElapsedMilliseconds);
         SolveResult best = new SolveResult(
             SolveStatus.ResourceLimit, Optimality.NotApplicable, false,
             TerminationReason.TimeLimit, MetricsScope.ExpandedPrefix, [], null, "稠密关求解未运行");
-        foreach (var shuffle in tiers)
+        // 记录"探索最多"的失败结果作为对外结论（比记录最后一次更能反映实际投入）
+        void Keep(SolveResult r)
+        {
+            if (r.Status == SolveStatus.Solved) return;
+            if ((r.Metrics?.StatesExplored ?? 0) > (best.Metrics?.StatesExplored ?? 0)) best = r;
+        }
+
+        // ① 窄束（主力）：成功即返回；失败通常 2~3 秒内枯竭，剩余预算自动让给后面两级
+        var narrow = new BeamSearchSolver<SlidePigLevel, SlidePigState, SlidePigMove>(
+            new BeamSearchSolver<SlidePigLevel, SlidePigState, SlidePigMove>.Options(Width: 64));
+        var r = narrow.Solve(bundle, new SolveRequest<SlidePigLevel>(
+            level, TimeSpan.FromMilliseconds(Remaining() * 60 / 100), budget,
+            command.MemoryBudgetBytes, command.FullEnumeration));
+        if (r.Status == SolveStatus.Solved) return FinishSolve(bundle, level, command, r, runConfigHash);
+        Keep(r);
+
+        // ② 宽束（加宽）：吃掉剩余预算的 70%
+        if (Remaining() > 1500)
+        {
+            var wide = new BeamSearchSolver<SlidePigLevel, SlidePigState, SlidePigMove>(
+                new BeamSearchSolver<SlidePigLevel, SlidePigState, SlidePigMove>.Options(Width: 256));
+            r = wide.Solve(bundle, new SolveRequest<SlidePigLevel>(
+                level, TimeSpan.FromMilliseconds(Remaining() * 70 / 100), budget,
+                command.MemoryBudgetBytes, command.FullEnumeration));
+            if (r.Status == SolveStatus.Solved) return FinishSolve(bundle, level, command, r, runConfigHash);
+            Keep(r);
+        }
+
+        // ③ 贪心兜底：平分剩余预算跑腾挪阶梯
+        var tierMs = Math.Max(400, Remaining() / 3);
+        foreach (var shuffle in new[] { 8, 16, 32 })
         {
             var solver = new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>(
                 new GreedyDfsSolver<SlidePigLevel, SlidePigState, SlidePigMove>.Options(
                     MobilityTiebreak: true, ShuffleBudget: shuffle));
-            var r = solver.Solve(bundle, new SolveRequest<SlidePigLevel>(
+            r = solver.Solve(bundle, new SolveRequest<SlidePigLevel>(
                 level, TimeSpan.FromMilliseconds(tierMs), budget, command.MemoryBudgetBytes, command.FullEnumeration));
-            if (r.Status == SolveStatus.Solved) { best = r; break; }
-            if (best.Status != SolveStatus.Solved) best = r;
+            if (r.Status == SolveStatus.Solved) return FinishSolve(bundle, level, command, r, runConfigHash);
+            Keep(r);
         }
         return FinishSolve(bundle, level, command, best, runConfigHash);
     }
