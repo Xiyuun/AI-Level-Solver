@@ -20,7 +20,7 @@ public static class GameEndpoints
         });
 
         // 玩法详情：接入产物全量 + 扫描画像（导入项目）
-        app.MapGet("/api/games/{gameId}", (string gameId, GameStore games, GameRegistry registry) =>
+        app.MapGet("/api/games/{gameId}", (string gameId, GameStore games, GameRegistry registry, AppDatabase db) =>
         {
             var g = games.FindGame(gameId);
             if (g is null) return Results.NotFound(new { message = $"未知玩法：{gameId}" });
@@ -32,7 +32,8 @@ public static class GameEndpoints
                 g.GameBrief, g.FormatSpec, g.RuleMatrix, g.RegisteredAt, g.UpdatedAt,
                 registry.TryGet(g.Id, out _), g.EngineType, g.ProjectRoot,
                 g.ProjectProfileJson is null ? null : ParseJson(g.ProjectProfileJson),
-                g.ProjectAnalysisJson is null ? null : ParseJson(g.ProjectAnalysisJson)));
+                g.ProjectAnalysisJson is null ? null : ParseJson(g.ProjectAnalysisJson),
+                g.ProjectRoot is null ? null : Path.Combine(db.DataDir, "plugins", g.Id)));
         });
 
         // 当前活跃玩法

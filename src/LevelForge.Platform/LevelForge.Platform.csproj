@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LevelForge.Kernel\LevelForge.Kernel.csproj" />
+    <ProjectReference Include="..\LevelForge.FacadeContracts\LevelForge.FacadeContracts.csproj" />
     <ProjectReference Include="..\Adapters\LevelForge.Adapters.SokobanToy\LevelForge.Adapters.SokobanToy.csproj" />
     <ProjectReference Include="..\Adapters\LevelForge.Adapters.SlidePig\LevelForge.Adapters.SlidePig.csproj" />
   </ItemGroup>

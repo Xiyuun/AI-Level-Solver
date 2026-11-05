@@ -1,5 +1,6 @@
 using LevelForge.Platform.Database;
 using LevelForge.Platform.Facades;
+using LevelForge.Platform.Plugins;
 using LevelForge.Platform.Storage;
 
 namespace LevelForge.Platform.Api;
@@ -71,8 +72,64 @@ public static class ProjectEndpoints
                 : Results.NotFound(new { message = $"未知玩法：{gameId}" });
         });
 
-        // 深度分析（向导②：平台内调用用户配置的模型——解冻记录见优化文档 §五 D8。
-        // 产出四问报告/机制/清单初稿，全部为待审核初稿；适配层代码仍由外部 AI 产出）
+        // 上传适配层插件（向导③，面向策划：不要求会操作文件目录——本页直接上传 AI 产出的 DLL）
+        app.MapPost("/api/games/{gameId}/plugins/upload", async (string gameId, PluginLoader loader,
+            GameStore games, AppDatabase db, HttpContext http) =>
+        {
+            if (games.FindGame(gameId) is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            var file = http.Request.Form.Files.FirstOrDefault();
+            if (file is null || file.Length == 0)
+            {
+                return Results.BadRequest(new { message = "缺少上传的适配层 DLL 文件" });
+            }
+            if (!file.FileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.BadRequest(new { message = "请上传 .dll 文件（AI 助手产出的适配层程序集）" });
+            }
+            var dir = Path.Combine(db.DataDir, "plugins", gameId);
+            Directory.CreateDirectory(dir);
+            var target = Path.Combine(dir, Path.GetFileName(file.FileName));
+            await using var stream = File.Create(target);
+            await file.OpenReadStream().CopyToAsync(stream);
+            return Results.Ok(new { saved = Path.GetFileName(target) });
+        });
+
+        // 检测适配层（向导③核心动作）：装载 plugins/{gameId}/ → 绑定校验 → 注册 → 自动跑门1
+        app.MapPost("/api/games/{gameId}/plugins/detect", (string gameId, PluginLoader loader,
+            GameStore games, Gates.GateService gates) =>
+        {
+            if (games.FindGame(gameId) is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            var outcome = loader.LoadForGame(gameId, allowOverwrite: true);
+            if (outcome.Loaded != "ok" && outcome.Loaded != "already")
+            {
+                return Results.BadRequest(new { message = outcome.Error ?? $"插件装载失败（{outcome.Loaded}）" });
+            }
+            // 注册成功：自动跑门1（强制验收——不带病玩法进入生成端）
+            var gate1Passed = false;
+            System.Text.Json.Nodes.JsonNode? gate1Report = null;
+            var gate1Message = "";
+            try
+            {
+                var gate1 = gates.RunGate1(gameId);
+                gate1Passed = gate1.Passed;
+                gate1Report = System.Text.Json.JsonSerializer.SerializeToNode(gate1.Report, LevelForge.Kernel.Replay.TapeJson.Options);
+            }
+            catch (Gates.GateException ex)
+            {
+                gate1Message = ex.Message;
+            }
+            return Results.Ok(new AdapterDetectResultDto(
+                outcome.GameId, outcome.Loaded, outcome.DisplayName, outcome.AdapterVersion,
+                outcome.AdapterHash, gate1Passed, gate1Report, gate1Message));
+        });
+
+        // 删除导入项目（从0重测）：仅限导入的、未注册适配层、未转正的玩法；级联清全部登记数据
         app.MapPost("/api/games/{gameId}/analyze", async (string gameId, ProjectAnalyzer analyzer, GameStore games, CancellationToken ct) =>
         {
             if (games.FindGame(gameId) is null)

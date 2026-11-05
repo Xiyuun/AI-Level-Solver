@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   analyzeProject,
   deleteProject,
+  detectAdapter,
   getOnboarding,
   rescanProject,
   runGate1,
@@ -15,6 +16,8 @@ import {
   setGate2NotApplicable,
   setLevelsRoot,
   updateOnboardingStep,
+  uploadPlugin,
+  type AdapterDetectResult,
   type GameDetail,
   type GameSummary,
   type OnboardingTask,
@@ -350,12 +353,13 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       '1. 阅读 LevelForge_glm/skills/onboarding-skill/（onboarding.md=接入总纲；deliverables.md=产物清单；contract.md=接入契约；reference/=实战参考）。',
       '2. 结合上方扫描事实核验关卡数据形态，产出资格评估结论（四问 + 证据），交由用户粘贴回向导②存档。',
       '3. 按 skill 产出一套适配层：关卡解析、状态/动作模型、求解适配，以及规则矩阵/格式说明书/机制表/视觉映射等接入产物。',
-      `4. 把门面登记进 LevelForge_glm/src/LevelForge.Platform/Facades/GameRegistry.cs（GameId 必须是「${game.gameId}」，与已导入的玩法行绑定）。`,
-      '5. 重新构建（dotnet build LevelForge_glm/LevelForge.slnx），提示用户重启平台，然后在平台「接入向导」运行门1 验收。',
+      '4. 把门面与适配层编译为独立插件程序集：新建 net10.0 类库项目（放在工具仓库之外的任意目录），ProjectReference 引用仓库内 src/LevelForge.FacadeContracts/LevelForge.FacadeContracts.csproj 与 src/LevelForge.Kernel/LevelForge.Kernel.csproj；门面类实现 IGameFacade。',
+      `5. Registration.GameId 必须一字不差为「${game.gameId}」（与已导入玩法行绑定）；编译产出 DLL（连同该插件的非契约依赖 DLL）交付给用户上传到平台向导③——平台检测时自动装载注册并跑门1。不要修改平台源码，不要重新构建平台。`,
       '',
       '# 约束',
       '- 严格遵循接入契约与诚实语义：非法数据必须抛异常，禁止静默修复；未知照实标注，不冒充结论。',
-      '- 参考实现：src/Adapters/SokobanToy（最小示例）、src/Adapters/SlidePig（实战参考，含踩坑记录）。',
+      '- 插件内不要复制 LevelForge.Kernel.dll / LevelForge.FacadeContracts.dll（平台加载器共享平台副本，复制会导致类型分裂）。',
+      '- 参考实现：src/Adapters/SokobanToy（最小示例）、src/Adapters/SlidePig（实战参考，含踩坑记录）；门面参考 src/LevelForge.Platform/Facades 下两个内置门面源文件。',
     )
     return lines.join('\n')
   }, [game.displayName, game.engineType, game.gameId, detail.projectRoot, profile, effectiveAnalysis])
@@ -370,10 +374,46 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     }
   }
 
+  // ③步骤B：上传 AI 产出的适配层 DLL（面向策划：不要求会操作文件目录）
+  const doUploadPlugin = async (file: File) => {
+    setBusy(true)
+    setError('')
+    try {
+      const r = await uploadPlugin(game.gameId, file)
+      setUploadedName(r.saved)
+      setMessage(`适配层文件已接收：${r.saved}——点「检测并验收」继续`)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // ③步骤C：检测适配层（装载+绑定校验+自动门1）
+  const doDetect = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const r = await detectAdapter(game.gameId)
+      setDetectResult(r)
+      if (r.gate1Passed) {
+        await markStep(3, 'done', `适配层已接入并过门1：${r.displayName}（v${r.adapterVersion}）`)
+        onStatusChanged()
+      }
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const gate3Zones = gate3 ? groupGate3(gate3.rows) : null
 
   // ③"开始生成适配层"引导卡展开态
   const [launchOpen, setLaunchOpen] = useState(false)
+  const [pluginFile, setPluginFile] = useState<File | null>(null)
+  const [uploadedName, setUploadedName] = useState('')
+  const [detectResult, setDetectResult] = useState<AdapterDetectResult | null>(null)
 
   // 顺序解锁（一步接一步）：①完成→②解锁；②完成/受阻→③解锁；④⑤⑥需适配层就绪
   const step1Done = statusOf(1) === 'done'
@@ -600,25 +640,69 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
             <div className="adapter-launch">
               <h4>开始生成「{game.displayName}」的求解器适配层</h4>
               <div className="dialog-note">
-                平台已备好带项目扫描事实的需求包。生成由你的 AI 编程助手在外部执行（平台冻结决策：不在平台内调模型产代码），
-                本页负责把上下文喂足、并在它完成后验收。
+                三步操作：①复制需求包交给 AI 编程助手 → ②它产出适配层文件后在本页上传 → ③点检测验收（自动装载并跑门1）。
+                全程不需要改工具代码、不需要跑构建命令。
               </div>
               {!launchOpen ? (
                 <button className="primary" onClick={() => { setLaunchOpen(true); void copyPrompt() }}>
-                  开始生成适配层（复制需求包给 AI 助手）
+                  第①步 · 开始生成适配层（复制需求包给 AI 助手）
                 </button>
               ) : (
                 <div className="adapter-handoff">
                   <ol>
                     <li>需求包已复制到剪贴板——粘贴给你的 AI 编程助手（ZCode / Cursor 等）执行；<button className="import-recent-item" onClick={() => void copyPrompt()}>再次复制</button>{copied && <span className="ok-inline"> 已复制</span>}</li>
-                    <li>它会按 skills/onboarding-skill 产出适配层，并把门面登记进 GameRegistry（gameId 已绑定本项目）。</li>
-                    <li>完成后重新构建（<code>dotnet build LevelForge_glm/LevelForge.slnx</code>）并<b>重启平台</b>。</li>
-                    <li>回到本页点下方「验证适配层」运行门1——全绿后即可在④⑤⑥完成验收与转正。</li>
+                    <li>它会按需求包产出适配层插件文件（.dll）。</li>
+                    <li>把产出的 DLL 文件在下方上传，然后点「检测并验收」。</li>
                   </ol>
                   <details>
                     <summary className="import-recent-item" style={{ display: 'inline-block' }}>查看需求包全文</summary>
                     <pre className="adapter-guide-prompt">{adapterPrompt}</pre>
                   </details>
+                </div>
+              )}
+              <div className="ob-form-row" style={{ marginTop: 12 }}>
+                <input
+                  type="file"
+                  accept=".dll"
+                  onChange={(e) => setPluginFile(e.target.files?.[0] ?? null)}
+                  title="选择 AI 助手产出的适配层 .dll 文件"
+                />
+                <button
+                  onClick={() => pluginFile && void doUploadPlugin(pluginFile)}
+                  disabled={!pluginFile || busy}
+                >
+                  {busy ? '上传中…' : '第②步 · 上传适配层文件'}
+                </button>
+                <button
+                  className="primary"
+                  onClick={() => void doDetect()}
+                  disabled={busy}
+                >
+                  {busy ? '检测中…' : '第③步 · 检测并验收适配层（自动跑门1）'}
+                </button>
+              </div>
+              {uploadedName && <div className="ok-message">已接收适配层文件：{uploadedName}</div>}
+              {detectResult && (
+                <div className={`gate1-verdict ${detectResult.gate1Passed ? 'ok' : 'bad'}`} style={{ marginTop: 10 }}>
+                  {detectResult.gate1Passed
+                    ? `适配层已接入并通过门1 ✓（${detectResult.displayName} v${detectResult.adapterVersion}）`
+                    : `适配层已装载但门1未通过——见下方检查卡；修复后重新上传并检测。${detectResult.gate1Message}`}
+                </div>
+              )}
+              {detectResult?.gate1Report && (
+                <div className="gate1-cards">
+                  {Object.entries(detectResult.gate1Report).map(([name, result]) => (
+                    <div key={name} className={`gate1-card ${result.passed ? 'ok' : 'bad'}`}>
+                      <div className="gate1-card-head">
+                        <span className="gate1-mark">{result.passed ? '✓' : '✗'}</span>
+                        <span className="gate1-name">{name}</span>
+                      </div>
+                      {result.issues.length > 0 && (
+                        <ul className="gate1-issues">{result.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
+                      )}
+                      {result.notes.length > 0 && <div className="gate1-notes">{result.notes.join('；')}</div>}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

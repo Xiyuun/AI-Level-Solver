@@ -7,6 +7,7 @@ using LevelForge.Platform.Facades;
 using LevelForge.Platform.Gates;
 using LevelForge.Platform.Generation;
 using LevelForge.Platform.Llm;
+using LevelForge.Platform.Plugins;
 using LevelForge.Platform.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,7 +19,8 @@ var database = new AppDatabase(dataDir);
 #region 服务装配（全部本地：SQLite + 文件，无外部依赖）
 
 builder.Services.AddSingleton(database);
-builder.Services.AddSingleton(GameRegistry.Instance);   // 静态注册表（冻结决策：随平台构建编译）
+builder.Services.AddSingleton(GameRegistry.Instance);   // 注册表：内置玩法编译期注册 + 插件玩法运行期装载（三轮 D7 解冻）
+builder.Services.AddSingleton<PluginLoader>();  // 适配层插件装载器（数据目录 plugins/{gameId}/）
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<GameStore>();
 builder.Services.AddSingleton<SolveRunStore>();
@@ -56,8 +58,9 @@ var app = builder.Build();
 
 #region 启动初始化 + 端点映射
 
-// 建表 + 种子注册（首次启动自动完成；权威列每次启动对齐注册表）
+// 建表 + 插件装载 + 种子注册（首次启动自动完成；权威列每次启动对齐注册表——含插件玩法）
 database.Initialize();
+app.Services.GetRequiredService<PluginLoader>().LoadAll();   // 三轮 D7：plugins/{gameId}/ 全量装载，重启后插件依然生效
 GameSeeder.Seed(database, app.Services.GetRequiredService<GameRegistry>());
 
 // 前端构建产物托管：开发模式找仓库 web/dist，自包含发布找 exe 同级 wwwroot

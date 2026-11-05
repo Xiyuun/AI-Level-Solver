@@ -21,7 +21,8 @@ public sealed record GameDetailDto(
     JsonNode? VisualMapping, JsonNode? Mechanics, JsonNode? DifficultyWeights,
     string GameBrief, string FormatSpec, string RuleMatrix,
     string RegisteredAt, string UpdatedAt,
-    bool AdapterReady, string? EngineType, string? ProjectRoot, JsonNode? ProjectProfile, JsonNode? ProjectAnalysis);
+    bool AdapterReady, string? EngineType, string? ProjectRoot, JsonNode? ProjectProfile, JsonNode? ProjectAnalysis,
+    string? PluginsRoot);
 
 // 当前活跃玩法
 public sealed record ActiveGameDto(string GameId);
@@ -234,3 +235,8 @@ public sealed record ProjectAnalysisDto(
 public sealed record QualificationAnswerDto(string Question, string Answer, string Evidence);
 
 public sealed record ChecklistDraftDto(string Group, string Text);
+
+// 适配层检测结果 DTO（向导③"检测适配层"按钮：装载+绑定校验+自动门1）
+public sealed record AdapterDetectResultDto(
+    string GameId, string Loaded, string? DisplayName, string? AdapterVersion, string? AdapterHash,
+    bool Gate1Passed, JsonNode? Gate1Report, string? Gate1Message);

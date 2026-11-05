@@ -1,3 +1,6 @@
+// 【插件契约】本程序集是平台与适配层插件共享的门面契约（三轮 D7 解冻）：
+// 插件引用本程序集 + Kernel 编译，运行时由平台加载器保证与平台共享同一份类型定义。
+// 命名空间保留 LevelForge.Platform.Facades 以零改动迁移——不是误放。
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using LevelForge.Kernel.Analysis;

@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/LevelForge.Kernel/LevelForge.Kernel.csproj" />
+    <Project Path="src/LevelForge.FacadeContracts/LevelForge.FacadeContracts.csproj" />
     <Project Path="src/LevelForge.Platform/LevelForge.Platform.csproj" />
   </Folder>
   <Folder Name="/src/Adapters/">
@@ -11,6 +12,7 @@
     <Project Path="tests/LevelForge.Adapters.SlidePig.Tests/LevelForge.Adapters.SlidePig.Tests.csproj" />
     <Project Path="tests/LevelForge.Adapters.SokobanToy.Tests/LevelForge.Adapters.SokobanToy.Tests.csproj" />
     <Project Path="tests/LevelForge.Kernel.Tests/LevelForge.Kernel.Tests.csproj" />
+    <Project Path="tests/LevelForge.TestPlugin/LevelForge.TestPlugin.csproj" />
     <Project Path="tests/LevelForge.Platform.Tests/LevelForge.Platform.Tests.csproj" />
   </Folder>
 </Solution>

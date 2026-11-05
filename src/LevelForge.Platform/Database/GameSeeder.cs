@@ -32,7 +32,8 @@ public static class GameSeeder
     #region 玩法行
 
     // 注册表权威列 upsert；status 仅首插写入（接入流程可改它：onboarding→trial→production）
-    private static void UpsertGame(AppDatabase db, GameRegistration r)
+    // 插件检测成功后也调用（三轮 D7）：把门面的权威元数据对齐进 games 行，status 保留接入流程的状态
+    public static void UpsertGame(AppDatabase db, GameRegistration r)
     {
         using var conn = db.Open();
         using var cmd = conn.CreateCommand();

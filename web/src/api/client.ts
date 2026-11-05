@@ -29,6 +29,7 @@ export interface GameDetail extends GameSummary {
   projectRoot: string | null // 导入项目的根目录（内置玩法为 null）
   projectProfile: ProjectProfile | null // 导入项目的扫描画像（关卡目录候选/抽样/机器观察）
   projectAnalysis: ProjectAnalysis | null // 深度分析结论初稿（平台内 LLM 产出，待用户审核确认）
+  pluginsRoot: string | null // 该玩法的适配层插件目录（数据目录/plugins/{gameId}，内置玩法为 null）
 }
 
 // 深度分析结论（三轮 N12 完整版 B：初稿语义，必须经用户审核/编辑）
@@ -261,6 +262,33 @@ export const setLevelsRoot = (gameId: string, levelsRoot: string) =>
 // 深度分析（向导②：平台内调设置页模型，产出四问/机制/清单初稿；耗时 30~120s）
 export const analyzeProject = (gameId: string) =>
   sendJson<ProjectAnalysis>(`/api/games/${gameId}/analyze`, 'POST')
+
+// 适配层插件（向导③：上传 AI 产出的 DLL → 检测装载+绑定校验+自动门1）
+export interface AdapterDetectResult {
+  gameId: string
+  loaded: string
+  displayName: string | null
+  adapterVersion: string | null
+  adapterHash: string | null
+  gate1Passed: boolean
+  gate1Report: Record<string, { passed: boolean; issues: string[]; notes: string[] }> | null
+  gate1Message: string
+}
+
+export const uploadPlugin = async (gameId: string, file: File): Promise<{ saved: string }> => {
+  const form = new FormData()
+  form.append('file', file)
+  const resp = await fetch(`/api/games/${gameId}/plugins/upload`, { method: 'POST', body: form })
+  const text = await resp.text()
+  if (!resp.ok) {
+    const payload = safeParse(text)
+    throw new Error(payload?.message ?? `上传失败：HTTP ${resp.status}`)
+  }
+  return JSON.parse(text)
+}
+
+export const detectAdapter = (gameId: string) =>
+  sendJson<AdapterDetectResult>(`/api/games/${gameId}/plugins/detect`, 'POST')
 
 // 求解与磁带
 export const listLevels = (gameId: string) => getJson<LevelRow[]>(`/api/games/${gameId}/levels`)

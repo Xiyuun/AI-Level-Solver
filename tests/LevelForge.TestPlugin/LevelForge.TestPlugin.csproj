@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 模拟真实插件编译场景：契约程序集只引用、不随包复制（Private=false），
+         运行时由平台加载器回退解析到平台副本——类型同一性的真实约束条件 -->
+    <ProjectReference Include="..\..\src\LevelForge.FacadeContracts\LevelForge.FacadeContracts.csproj">
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\LevelForge.Kernel\LevelForge.Kernel.csproj">
+      <Private>false</Private>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>

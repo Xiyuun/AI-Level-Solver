@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\LevelForge.Platform\LevelForge.Platform.csproj" />
+    <ProjectReference Include="..\LevelForge.TestPlugin\LevelForge.TestPlugin.csproj" />
   </ItemGroup>
 
 </Project>
