@@ -234,3 +234,15 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
 - **v3 迁移** games.project_profile_json；导入即扫描；`POST /api/games/{id}/rescan` 重扫；`PUT /api/games/{id}/levels-root` 真回填；门2"不适用"可无驱动命令登记（导入默认未评估 → 用户显式确认）。
 - **向导五步全部画像驱动**：①候选预填+真回填+适用性显式选择 ②机器事实表格+AI 判断存档（平台不冒充判断）③产物假绿整块隐藏（适配层产出后才验收）+需求包内嵌扫描事实 ④清单=模板+画像派生条目（◆标记）、可增删、按玩法持久化在 step4 detail_json。
 - 测试：后端 268→271 + 前端 73→75 全绿。生成/求解/门1~3/采纳/批量经核对均为真实后端逻辑（有测试与库证据），向导是唯一静态区——本轮已消除。
+
+### 10.7 三轮·D7 解冻落地：适配层插件热加载 + 面向策划向导（2026-11-05，`9a2782c`）
+
+用户拍板解冻 D7（工具面向策划，接入流程不允许构建命令）。落地：
+
+- **契约下沉**：新建 `LevelForge.FacadeContracts` 程序集（IGameFacade/GameRegistration/SolveCommand/坐标制接口迁入，命名空间零改动），插件引用它 + Kernel 编译，平台与插件共享同一份类型定义（类型同一性）。
+- **PluginLoader**：隔离 AssemblyLoadContext（本地 DLL 优先解析、契约回退平台副本）、启动全量扫描 plugins/{gameId}/、定向 LoadForGame（绑定校验：插件声明 gameId 必须与导入玩法一致，否则拒绝注册）。
+- **检测/上传端点**：POST plugins/upload（面向策划：页面上传 DLL，不要求会操作目录）、POST plugins/detect（装载 → 注册 → 权威列 upsert → 自动跑门1）；detect 后 adapterReady 即翻转，生成/求解/关卡导入全部就绪。
+- **向导③三步式**：复制需求包 → 上传适配层文件 → 检测并验收（自动门1 卡片内显）；需求包模板改为「产出插件 DLL + 上传」模型（外部 AI 不改平台源码）。
+- 测试：后端 274→277（装载/绑定拒绝/上传检测端点）+ 前端 75 全绿；浏览器端到端实测通过（导入→上传→检测→门1 绿→adapterReady 翻转）。
+- 修复：插件根相对路径导致 AssemblyDependencyResolver 抛错（规范化绝对路径）；persistChecklist 闭包旧值覆盖新列表。
+- D7=B（重编译+重启）保留为兜底说明；热卸载后置（升级 DLL 需重启一次，约 3 秒）。
