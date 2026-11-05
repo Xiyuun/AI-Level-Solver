@@ -21,7 +21,7 @@ public sealed record GameDetailDto(
     JsonNode? VisualMapping, JsonNode? Mechanics, JsonNode? DifficultyWeights,
     string GameBrief, string FormatSpec, string RuleMatrix,
     string RegisteredAt, string UpdatedAt,
-    bool AdapterReady, string? EngineType, string? ProjectRoot, JsonNode? ProjectProfile);
+    bool AdapterReady, string? EngineType, string? ProjectRoot, JsonNode? ProjectProfile, JsonNode? ProjectAnalysis);
 
 // 当前活跃玩法
 public sealed record ActiveGameDto(string GameId);
@@ -222,3 +222,15 @@ public sealed record ProjectRescanResultDto(string GameId, string EngineType, st
 
 // 关卡根目录确认请求（向导①：用户从扫描候选中选定）
 public sealed record LevelsRootRequestDto(string? LevelsRoot);
+
+// 深度分析结论 DTO（向导②：四问初稿/机制/清单初稿/风险——全部待用户审核确认）
+public sealed record ProjectAnalysisDto(
+    string AnalyzedAt, string Model,
+    IReadOnlyList<QualificationAnswerDto> FourQuestions,
+    IReadOnlyList<string> Mechanics,
+    IReadOnlyList<ChecklistDraftDto> ChecklistDraft,
+    IReadOnlyList<string> Risks, string Summary);
+
+public sealed record QualificationAnswerDto(string Question, string Answer, string Evidence);
+
+public sealed record ChecklistDraftDto(string Group, string Text);

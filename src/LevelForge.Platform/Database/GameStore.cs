@@ -5,6 +5,7 @@ namespace LevelForge.Platform.Database;
 // 玩法行：games 表整行 + 关卡数（列表页一次查询带回）
 // ProjectRoot/EngineType：仅导入的项目有值（静态注册玩法为 NULL，见 AppDatabase Migrate v2）
 // ProjectProfileJson：导入项目的扫描画像快照（v3，ProjectScanner 产出）
+// ProjectAnalysisJson：深度分析结论快照（v4，ProjectAnalyzer 产出，初稿语义待用户确认）
 public sealed record GameRow(
     string Id, string DisplayName, string Status,
     string AdapterVer, string AdapterHash, string KernelVer, string ContractVer,
@@ -12,7 +13,7 @@ public sealed record GameRow(
     string VisualMappingJson, string MechanicsJson, string GameBrief, string FormatSpec,
     string RuleMatrix, string DifficultyWeightsJson,
     string? Gate2DriverJson,
-    string? ProjectRoot, string? EngineType, string? ProjectProfileJson,
+    string? ProjectRoot, string? EngineType, string? ProjectProfileJson, string? ProjectAnalysisJson,
     string RegisteredAt, string UpdatedAt, long LevelCount);
 
 // 关卡行：levels 表整行
@@ -143,6 +144,18 @@ public sealed class GameStore
         return cmd.ExecuteNonQuery() == 1;
     }
 
+    // 深度分析结论快照（三轮 N12 完整版 B：平台内 LLM 分析，解冻记录见优化文档 §五 D8）
+    public bool UpdateAnalysis(string gameId, string analysisJson)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE games SET project_analysis_json = $analysis, updated_at = $now WHERE id = $id";
+        cmd.Parameters.AddWithValue("$analysis", analysisJson);
+        cmd.Parameters.AddWithValue("$now", AppDatabase.UtcNowIso);
+        cmd.Parameters.AddWithValue("$id", gameId);
+        return cmd.ExecuteNonQuery() == 1;
+    }
+
     // 删除导入项目：子表 → 父表按外键序清理，返回磁带文件路径供调用方删文件。
     // 只删 project_root 非空的行（导入项目）；内置/静态注册玩法由 SQL 条件兜底拒绝
     public (bool Deleted, List<string> TapeFiles) DeleteImportedGame(string gameId)
@@ -232,6 +245,7 @@ public sealed class GameStore
                 reader.IsDBNull(reader.GetOrdinal("project_root")) ? null : reader.GetString(reader.GetOrdinal("project_root")),
                 reader.IsDBNull(reader.GetOrdinal("engine_type")) ? null : reader.GetString(reader.GetOrdinal("engine_type")),
                 reader.IsDBNull(reader.GetOrdinal("project_profile_json")) ? null : reader.GetString(reader.GetOrdinal("project_profile_json")),
+                reader.IsDBNull(reader.GetOrdinal("project_analysis_json")) ? null : reader.GetString(reader.GetOrdinal("project_analysis_json")),
                 reader.GetString(reader.GetOrdinal("registered_at")),
                 reader.GetString(reader.GetOrdinal("updated_at")),
                 reader.GetInt64(reader.GetOrdinal("level_count"))));

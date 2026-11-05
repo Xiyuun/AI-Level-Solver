@@ -4,6 +4,7 @@
 // 平台仍不做适配层生成（冻结决策）：智能在需求包引导的外部 AI，页面负责喂足事实与验收编排
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  analyzeProject,
   deleteProject,
   getOnboarding,
   rescanProject,
@@ -17,12 +18,13 @@ import {
   type GameDetail,
   type GameSummary,
   type OnboardingTask,
+  type ProjectAnalysis,
 } from '../api/client'
 import {
   allStepsDone,
   checklistComplete,
   groupGate3,
-  seedChecklist,
+  seedChecklistFromAnalysis,
   stepTitle,
   type ChecklistItem,
 } from '../state/onboarding'
@@ -50,8 +52,13 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   const [driverArgs, setDriverArgs] = useState('')
   const [driverTimeout, setDriverTimeout] = useState(180)
 
-  // ②报告存档
+  // ②报告存档 + 深度分析
   const [report, setReport] = useState('')
+  const [analysis, setAnalysis] = useState<ProjectAnalysis | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+
+  // 深度分析结果：优先用本会话刚产出的；否则用库里已有的
+  const effectiveAnalysis = analysis ?? detail.projectAnalysis
 
   // ③门1
   const [gate1, setGate1] = useState<{ passed: boolean; report: Record<string, { passed: boolean; issues: string[]; notes: string[] }> | null } | null>(null)
@@ -85,7 +92,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     setChosenRoot(detail.levelsRoot || profile?.levelDirCandidates?.[0]?.directory || '')
   }, [detail.gameId, detail.levelsRoot, profile])
 
-  // ④清单初始化：已持久化的用持久化值；否则模板 + 画像派生
+  // ④清单初始化：已持久化的用持久化值；否则按 深度分析初稿 > 画像派生 > 纯模板 优先级生成
   useEffect(() => {
     if (initialized) return
     const step4 = tasks.find((t) => t.step === 4)
@@ -102,10 +109,10 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       }
     }
     if (detail.projectProfile !== undefined) {   // 详情已加载（null=内置玩法）
-      setItems(seedChecklist(profile))
+      setItems(seedChecklistFromAnalysis(profile, detail.projectAnalysis))
       setInitialized(true)
     }
-  }, [tasks, profile, detail.projectProfile, initialized])
+  }, [tasks, profile, detail.projectProfile, detail.projectAnalysis, initialized])
 
   const markStep = async (step: number, status: string, detailText?: string) => {
     setError('')
@@ -130,6 +137,46 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       setBusy(false)
     }
   }
+
+  // ②深度分析：平台内调设置页模型产出初稿——初稿必须经用户审核，不冒充已确认事实
+  const doAnalyze = async () => {
+    setAnalyzing(true)
+    setError('')
+    try {
+      const result = await analyzeProject(game.gameId)
+      setAnalysis(result)
+      setReport((prev) => (prev.trim() ? prev : formatAnalysis(result)))
+      setMessage(`深度分析完成（${result.model}）——以下为初稿，请逐条审核`)
+      onStatusChanged()   // 库里的分析结论随之刷新
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  // 深度分析初稿 → ④清单（与持久化联动）
+  const applyChecklistDraft = () => {
+    if (!effectiveAnalysis) return
+    const next = seedChecklistFromAnalysis(profile, effectiveAnalysis)
+    setItems(next)
+    setChecked([])
+    void persistChecklist('todo', next)
+    setMessage('清单初稿已写入④（可在④继续增删）')
+  }
+
+  const formatAnalysis = (a: ProjectAnalysis) => [
+    `深度分析初稿（${a.model}，${new Date(a.analyzedAt).toLocaleString()}）——请逐条审核后存档：`,
+    '',
+    ...a.fourQuestions.map((q) => `【${q.answer.toUpperCase()}】${q.question}\n    证据：${q.evidence}`),
+    '',
+    '机制清单：',
+    ...a.mechanics.map((m) => `  - ${m}`),
+    '风险点：',
+    ...a.risks.map((r) => `  - ${r}`),
+    '',
+    `总结：${a.summary}`,
+  ].join('\n')
 
   // ①：确认关卡根目录（真回填库；后续关卡导入面板以此为默认目录）
   const submitLevelsRoot = async () => {
@@ -201,14 +248,15 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   }
 
   // ④：清单持久化（按玩法；items 全量保存，勾选完成才落 done）
-  const persistChecklist = async (status: 'done' | 'todo') => {
-    const payload = JSON.stringify({ items, updatedAt: new Date().toISOString() })
+  // listOverride：调用方刚 setItems 尚未反映到本次渲染闭包时，显式传入新列表（避免旧闭包值覆盖）
+  const persistChecklist = async (status: 'done' | 'todo', listOverride?: ChecklistItem[]) => {
+    const payload = JSON.stringify({ items: listOverride ?? items, updatedAt: new Date().toISOString() })
     await markStep(4, status, payload)
   }
 
   const submitChecklist = async () => {
     if (!checklistComplete(checked, items)) {
-      setError('清单未全部勾选——语义歧义项请转用例，禁止直接勾选')
+      setError('清单未全部勾选项请转用例，禁止直接勾选')
       return
     }
     await persistChecklist('done')
@@ -218,8 +266,10 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     const text = newItemText.trim()
     if (!text) return
     const maxIndex = items.reduce((m, i) => Math.max(m, i.index), 0)
-    setItems((prev) => [...prev, { group: 'A', index: maxIndex + 1, text, custom: true }])
+    const next = [...items, { group: 'A' as const, index: maxIndex + 1, text, custom: true }]
+    setItems(next)
     setNewItemText('')
+    void persistChecklist('todo', next)
   }
 
   const removeChecklistItem = (index: number) => {
@@ -285,6 +335,15 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
         lines.push(`- 抽样文件 ${s.path}（${s.bytes}B）顶层键：{${s.topLevelKeys}}`)
       }
     }
+    if (effectiveAnalysis) {
+      lines.push('', '# 深度分析结论（平台内模型初稿，已经用户审核环节；仍请核验）')
+      for (const q of effectiveAnalysis.fourQuestions) {
+        lines.push(`- 四问｜${q.question}：${q.answer}（证据：${q.evidence}）`)
+      }
+      for (const m of effectiveAnalysis.mechanics) lines.push(`- 机制｜${m}`)
+      for (const r of effectiveAnalysis.risks) lines.push(`- 风险｜${r}`)
+      if (effectiveAnalysis.summary) lines.push(`- 总结｜${effectiveAnalysis.summary}`)
+    }
     lines.push(
       '',
       '# 任务步骤',
@@ -299,7 +358,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       '- 参考实现：src/Adapters/SokobanToy（最小示例）、src/Adapters/SlidePig（实战参考，含踩坑记录）。',
     )
     return lines.join('\n')
-  }, [game.displayName, game.engineType, game.gameId, detail.projectRoot, profile])
+  }, [game.displayName, game.engineType, game.gameId, detail.projectRoot, profile, effectiveAnalysis])
 
   const copyPrompt = async () => {
     try {
@@ -484,8 +543,44 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
                 </tbody>
               </table>
               <div className="ob-note">
-                资格四问（回合制/确定性/状态可枚举/持续产关）需要结合游戏代码做语义判断——把需求包交给你的 AI 编程助手评估，把它的结论粘贴到下面存档。平台不替 AI 冒充这份判断。
+                资格四问需要结合游戏代码做语义判断——点下方按钮让平台调用你配置的模型产出<b>初稿</b>，逐条审核后存档；
+                也可以把需求包交给外部 AI 评估后粘贴回来。
               </div>
+              {!effectiveAnalysis && (
+                <button className="primary" onClick={() => void doAnalyze()} disabled={analyzing}>
+                  {analyzing ? '深度分析中…（模型推理约需 30~120 秒，请勿关闭页面）' : '开始深度分析（调用设置页的模型）'}
+                </button>
+              )}
+              {effectiveAnalysis && (
+                <div className="gate1-cards">
+                  {effectiveAnalysis.fourQuestions.map((q) => (
+                    <div key={q.question} className={`gate1-card ${q.answer === 'yes' ? 'ok' : q.answer === 'no' ? 'bad' : ''}`}>
+                      <div className="gate1-card-head">
+                        <span className="gate1-mark">{q.answer === 'yes' ? '✓' : q.answer === 'no' ? '✗' : '?'}</span>
+                        <span className="gate1-name">{q.question}</span>
+                        <span className={`state-chip ${q.answer === 'yes' ? 'state-passed' : q.answer === 'no' ? 'state-failed' : 'state-pending'}`}>
+                          {q.answer === 'yes' ? '满足' : q.answer === 'no' ? '不满足' : '不确定'}
+                        </span>
+                      </div>
+                      <div className="gate1-notes">证据：{q.evidence}</div>
+                    </div>
+                  ))}
+                  {effectiveAnalysis.mechanics.length > 0 && (
+                    <div className="gate1-card">
+                      <div className="gate1-card-head"><span className="gate1-name">机制清单（{effectiveAnalysis.mechanics.length}）</span></div>
+                      <ul className="gate1-issues">{effectiveAnalysis.mechanics.map((m, i) => <li key={i}>{m}</li>)}</ul>
+                    </div>
+                  )}
+                  {effectiveAnalysis.risks.length > 0 && (
+                    <div className="gate1-card">
+                      <div className="gate1-card-head"><span className="gate1-name">适配层风险点</span></div>
+                      <ul className="gate1-issues">{effectiveAnalysis.risks.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                    </div>
+                  )}
+                  <div className="gate1-verdict">{effectiveAnalysis.summary}</div>
+                  <button onClick={applyChecklistDraft}>把清单初稿写入④审核清单</button>
+                </div>
+              )}
             </>
           ) : (
             <div className="ob-note">内置玩法：资格评估已在接入时完成（存档见 detail_json）。</div>

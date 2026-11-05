@@ -73,8 +73,17 @@ public sealed class AppDatabase
             m.ExecuteNonQuery();
         }
 
+        if (current < 4)
+        {
+            // v4（三轮 N12 完整版·深度分析）：平台内 LLM 产出的资格评估/清单初稿（解冻记录见优化文档 §五 D8）。
+            // JSON 快照存 games 行；静态注册玩法与未分析的导入项目为 NULL
+            using var m = conn.CreateCommand();
+            m.CommandText = "ALTER TABLE games ADD COLUMN project_analysis_json TEXT;";
+            m.ExecuteNonQuery();
+        }
+
         using var set = conn.CreateCommand();
-        set.CommandText = "PRAGMA user_version=3";
+        set.CommandText = "PRAGMA user_version=4";
         set.ExecuteNonQuery();
     }
 

@@ -31,7 +31,8 @@ public static class GameEndpoints
                 ParseJson(g.VisualMappingJson), ParseJson(g.MechanicsJson), ParseJson(g.DifficultyWeightsJson),
                 g.GameBrief, g.FormatSpec, g.RuleMatrix, g.RegisteredAt, g.UpdatedAt,
                 registry.TryGet(g.Id, out _), g.EngineType, g.ProjectRoot,
-                g.ProjectProfileJson is null ? null : ParseJson(g.ProjectProfileJson)));
+                g.ProjectProfileJson is null ? null : ParseJson(g.ProjectProfileJson),
+                g.ProjectAnalysisJson is null ? null : ParseJson(g.ProjectAnalysisJson)));
         });
 
         // 当前活跃玩法

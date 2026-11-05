@@ -1,5 +1,5 @@
 // 接入向导纯逻辑：审核清单（skill checklist.md 模板 + 项目裁剪）、六步完成度、上线条件
-import type { OnboardingTask, ProjectProfile } from '../api/client'
+import type { OnboardingTask, ProjectAnalysis, ProjectProfile } from '../api/client'
 
 // 审核清单条目（模板条目照抄 checklist.md 四大组；custom=true 是按项目画像派生的条目）
 export interface ChecklistItem {
@@ -46,6 +46,18 @@ export function seedChecklist(profile: ProjectProfile | null): ChecklistItem[] {
   }
   if (profile?.engine === 'unity') {
     push('C', 'Unity 特有：物理/协程表现未混入胜负判定，判层结果以游戏本体判定为准')
+  }
+  return items
+}
+
+// 深度分析初稿 → 清单条目（三轮 N12 完整版 B）：模型产出的核对项并入模板种子，逐条标注"AI 初稿"
+export function seedChecklistFromAnalysis(profile: ProjectProfile | null, analysis: ProjectAnalysis | null): ChecklistItem[] {
+  const items = seedChecklist(profile)
+  if (!analysis?.checklistDraft?.length) return items
+  let next = items.reduce((m, i) => Math.max(m, i.index), 99) + 1
+  for (const d of analysis.checklistDraft) {
+    const group = (['A', 'B', 'C', 'D'].includes(d.group) ? d.group : 'A') as ChecklistItem['group']
+    if (d.text?.trim()) items.push({ group, index: next++, text: d.text.trim(), custom: true })
   }
   return items
 }

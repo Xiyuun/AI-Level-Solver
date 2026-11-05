@@ -24,7 +24,7 @@ public sealed class DatabaseAndSeedTests : IDisposable
         using var conn = db.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "PRAGMA user_version";
-        Assert.Equal(3L, (long)cmd.ExecuteScalar()!);   // v3：games 增 project_profile_json（扫描画像，三轮 N12）
+        Assert.Equal(4L, (long)cmd.ExecuteScalar()!);   // v4：games 增 project_analysis_json（深度分析，三轮 N12 完整版）
     }
 
     [Fact]

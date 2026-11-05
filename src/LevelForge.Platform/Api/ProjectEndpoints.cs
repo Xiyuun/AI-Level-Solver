@@ -71,6 +71,29 @@ public static class ProjectEndpoints
                 : Results.NotFound(new { message = $"未知玩法：{gameId}" });
         });
 
+        // 深度分析（向导②：平台内调用用户配置的模型——解冻记录见优化文档 §五 D8。
+        // 产出四问报告/机制/清单初稿，全部为待审核初稿；适配层代码仍由外部 AI 产出）
+        app.MapPost("/api/games/{gameId}/analyze", async (string gameId, ProjectAnalyzer analyzer, GameStore games, CancellationToken ct) =>
+        {
+            if (games.FindGame(gameId) is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            try
+            {
+                var report = await analyzer.Analyze(gameId, ct);
+                return Results.Ok(new ProjectAnalysisDto(
+                    report.AnalyzedAt, report.Model,
+                    report.FourQuestions.Select(q => new QualificationAnswerDto(q.Question, q.Answer, q.Evidence)).ToList(),
+                    report.Mechanics, report.ChecklistDraft.Select(c => new ChecklistDraftDto(c.Group, c.Text)).ToList(),
+                    report.Risks, report.Summary));
+            }
+            catch (ProjectAnalysisException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
         // 删除导入项目（从0重测）：仅限导入的、未注册适配层、未转正的玩法；级联清全部登记数据
         app.MapDelete("/api/projects/{gameId}", (string gameId, ProjectImporter importer, GameStore games,
             GameRegistry registry, SettingsStore settings) =>

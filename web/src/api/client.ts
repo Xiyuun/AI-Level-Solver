@@ -28,6 +28,18 @@ export interface GameDetail extends GameSummary {
   ruleMatrix: string
   projectRoot: string | null // 导入项目的根目录（内置玩法为 null）
   projectProfile: ProjectProfile | null // 导入项目的扫描画像（关卡目录候选/抽样/机器观察）
+  projectAnalysis: ProjectAnalysis | null // 深度分析结论初稿（平台内 LLM 产出，待用户审核确认）
+}
+
+// 深度分析结论（三轮 N12 完整版 B：初稿语义，必须经用户审核/编辑）
+export interface ProjectAnalysis {
+  analyzedAt: string
+  model: string
+  fourQuestions: { question: string; answer: string; evidence: string }[]
+  mechanics: string[]
+  checklistDraft: { group: string; text: string }[]
+  risks: string[]
+  summary: string
 }
 
 // 项目扫描画像（三轮 N12：全部是机器可直接验证的事实）
@@ -245,6 +257,10 @@ export const rescanProject = (gameId: string) =>
   sendJson<{ gameId: string; engineType: string; projectRoot: string }>(`/api/games/${gameId}/rescan`, 'POST')
 export const setLevelsRoot = (gameId: string, levelsRoot: string) =>
   sendJson<{ levelsRoot: string }>(`/api/games/${gameId}/levels-root`, 'PUT', { levelsRoot })
+
+// 深度分析（向导②：平台内调设置页模型，产出四问/机制/清单初稿；耗时 30~120s）
+export const analyzeProject = (gameId: string) =>
+  sendJson<ProjectAnalysis>(`/api/games/${gameId}/analyze`, 'POST')
 
 // 求解与磁带
 export const listLevels = (gameId: string) => getJson<LevelRow[]>(`/api/games/${gameId}/levels`)

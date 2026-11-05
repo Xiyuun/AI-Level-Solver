@@ -4,13 +4,26 @@ using LevelForge.Platform.Database;
 namespace LevelForge.Platform.Storage;
 
 // 项目扫描结论：全部是机器可直接验证的事实（诚实语义——观察不冒充判断，四问结论仍由 AI/人给出）
+// SchemaSummaries（三轮 N12 完整版）：候选目录的全量 schema 分析（共键/嵌套结构/实体类型/数值范围/异常）
 public sealed record ProjectProfile(
     string ScannedAt,
     string ProjectRoot,
     string Engine,
     IReadOnlyList<LevelDirCandidate> LevelDirCandidates,
     IReadOnlyList<SampleFile> SampleFiles,
-    IReadOnlyList<string> Observations);
+    IReadOnlyList<string> Observations,
+    IReadOnlyList<SchemaSummary>? SchemaSummaries = null);
+
+// 一个候选目录的全量 schema 事实：对目录内全部（≤100 个）可解析 JSON 做聚合
+public sealed record SchemaSummary(
+    string Directory,
+    int FileCount,
+    int ParsedCount,
+    string CommonKeys,          // ≥80% 文件都有的顶层键（逗号串）
+    string NestedKeys,          // 数组元素的嵌套键（如 chesses[]: id,x,y,type）
+    string EntityTypes,         // 带判别字段的取值清单（如 type: normal,boom,lock）
+    string NumericRanges,       // 主要数值字段的 min~max（逗号串）
+    IReadOnlyList<string> Anomalies);   // 解析失败/缺键等异常事实
 
 // 关卡目录候选：按"同目录下相似命名的 JSON 数量"排序（levels/*.json、level_1.json、1.json 这类聚簇）
 public sealed record LevelDirCandidate(
@@ -39,9 +52,10 @@ public static class ProjectScanner
         var jsons = CollectJsonFiles(projectRoot);
         var candidates = RankLevelDirs(jsons);
         var samples = SampleFiles(projectRoot, candidates, jsons);
-        var observations = BuildObservations(engine, candidates, samples, jsons.Count);
+        var schemas = SchemaSummaries(projectRoot, candidates);
+        var observations = BuildObservations(engine, candidates, samples, jsons.Count, schemas);
         return new ProjectProfile(
-            AppDatabase.UtcNowIso, projectRoot, engine, candidates, samples, observations);
+            AppDatabase.UtcNowIso, projectRoot, engine, candidates, samples, observations, schemas);
     }
 
     // 序列化/反序列化（games.project_profile_json 存取口径）
@@ -189,7 +203,8 @@ public static class ProjectScanner
     }
 
     // 机器观察：只陈述事实，不下语义结论（诚实语义）
-    private static List<string> BuildObservations(string engine, List<LevelDirCandidate> candidates, List<SampleFile> samples, int totalJson)
+    private static List<string> BuildObservations(string engine, List<LevelDirCandidate> candidates,
+        List<SampleFile> samples, int totalJson, List<SchemaSummary> schemas)
     {
         var obs = new List<string>
         {
@@ -215,8 +230,118 @@ public static class ProjectScanner
         {
             obs.Add($"有 {failed.Count} 个抽样文件解析失败（{string.Join("；", failed.Select(f => f.Path))}）");
         }
+        // 全量 schema 摘要（N12 完整版：顶层候选的全库聚合事实）
+        var topSchema = schemas.FirstOrDefault(s => s.ParsedCount > 0);
+        if (topSchema is not null)
+        {
+            obs.Add($"[{topSchema.Directory}/] 全量 {topSchema.FileCount} 关中 {topSchema.ParsedCount} 个可解析；"
+                + $"共键：{{{topSchema.CommonKeys}}}"
+                + (topSchema.NestedKeys.Length > 0 ? $"；嵌套：{topSchema.NestedKeys}" : "")
+                + (topSchema.EntityTypes.Length > 0 ? $"；判别值：{topSchema.EntityTypes}" : "")
+                + (topSchema.NumericRanges.Length > 0 ? $"；数值范围：{topSchema.NumericRanges}" : "")
+                + (topSchema.Anomalies.Count > 0 ? $"；异常 {topSchema.Anomalies.Count} 条：{string.Join("；", topSchema.Anomalies.Take(3))}" : ""));
+        }
         return obs;
     }
+
+    #region 全量 schema 聚合（N12 完整版 A：深度确定性扫描）
+
+    // 对前两个候选目录做全量聚合（每目录 ≤100 个文件）：共键 / 数组元素嵌套键 / 判别字段取值 / 数值范围 / 异常
+    private static List<SchemaSummary> SchemaSummaries(string root, List<LevelDirCandidate> candidates)
+    {
+        var result = new List<SchemaSummary>();
+        foreach (var candidate in candidates.Take(2))
+        {
+            var dirFull = Path.Combine(root, candidate.Directory.Replace('/', Path.DirectorySeparatorChar));
+            var files = new List<string>();
+            try
+            {
+                files = Directory.EnumerateFiles(dirFull, "*.json").Take(100).ToList();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+            var keyCount = new Dictionary<string, int>(StringComparer.Ordinal);
+            var nested = new SortedDictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var discriminator = new SortedDictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var numeric = new Dictionary<string, (double Min, double Max, int Seen)>(StringComparer.Ordinal);
+            var anomalies = new List<string>();
+            var parsedCount = 0;
+            foreach (var file in files)
+            {
+                JsonDocument doc;
+                try
+                {
+                    doc = JsonDocument.Parse(File.ReadAllText(file));
+                }
+                catch (Exception ex) when (ex is JsonException or IOException)
+                {
+                    anomalies.Add($"{Path.GetFileName(file)}: 解析失败（{ex.Message}）");
+                    continue;
+                }
+                using (doc)
+                {
+                    parsedCount++;
+                    if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                    {
+                        anomalies.Add($"{Path.GetFileName(file)}: 顶层不是对象");
+                        continue;
+                    }
+                    foreach (var prop in doc.RootElement.EnumerateObject())
+                    {
+                        keyCount[prop.Name] = keyCount.GetValueOrDefault(prop.Name) + 1;
+                        switch (prop.Value.ValueKind)
+                        {
+                            case JsonValueKind.Number when prop.Value.TryGetDouble(out var d):
+                                (double Min, double Max, int Seen) cur = numeric.GetValueOrDefault(prop.Name, (d, d, 0));
+                                numeric[prop.Name] = (Math.Min(cur.Min, d), Math.Max(cur.Max, d), cur.Seen + 1);
+                                break;
+                            case JsonValueKind.Array when prop.Value.GetArrayLength() > 0:
+                                foreach (var el in prop.Value.EnumerateArray())
+                                {
+                                    if (el.ValueKind != JsonValueKind.Object) continue;
+                                    foreach (var inner in el.EnumerateObject())
+                                    {
+                                        var key = $"{prop.Name}[]:{inner.Name}";
+                                        nested.TryAdd(key, new HashSet<string>(StringComparer.Ordinal));
+                                        if (inner.Value.ValueKind is JsonValueKind.String)
+                                        {
+                                            nested[key].Add(inner.Value.GetString() ?? "");
+                                        }
+                                    }
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
+            // 共键：出现在 ≥80% 可解析文件中
+            var threshold = Math.Max(1, (int)Math.Ceiling(parsedCount * 0.8));
+            var commonKeys = string.Join(",", keyCount.Where(kv => kv.Value >= threshold)
+                .OrderByDescending(kv => kv.Value).Select(kv => kv.Key));
+            // 嵌套键：数组元素结构（跳过纯自由文本的值集合）
+            var nestedKeys = string.Join(";", nested
+                .Where(kv => kv.Key.EndsWith(":type", StringComparison.Ordinal) is false)
+                .Select(kv => kv.Key).Take(10));
+            // 判别字段取值：xxx[]:type 的全部取值（实体类型清单）
+            var entityTypes = string.Join(",", nested
+                .Where(kv => kv.Key.EndsWith(":type", StringComparison.Ordinal))
+                .SelectMany(kv => kv.Value).Distinct().Take(20));
+            // 数值范围：至少出现在 3 个文件中的数值字段
+            var numericRanges = string.Join(",", numeric
+                .Where(kv => kv.Value.Seen >= 3 && kv.Value.Max > kv.Value.Min)
+                .OrderBy(kv => kv.Key).Take(10)
+                .Select(kv => $"{kv.Key}:{FormatNum(kv.Value.Min)}~{FormatNum(kv.Value.Max)}"));
+            result.Add(new SchemaSummary(candidate.Directory, files.Count, parsedCount,
+                commonKeys, nestedKeys, entityTypes, numericRanges, anomalies.Take(10).ToList()));
+        }
+        return result;
+    }
+
+    private static string FormatNum(double d) => d == Math.Truncate(d) ? ((long)d).ToString() : d.ToString("0.##");
+
+    #endregion
 
     #endregion
 }
