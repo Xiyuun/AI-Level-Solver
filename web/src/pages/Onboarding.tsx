@@ -2,11 +2,12 @@
 // ①关卡目录候选预填（扫描产出，用户确认后真回填库）②机器事实区（扫描观察，不冒充判断）
 // ③需求包内嵌扫描事实 ④审核清单按项目派生、可增删、按玩法持久化
 // 平台仍不做适配层生成（冻结决策）：智能在需求包引导的外部 AI，页面负责喂足事实与验收编排
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   analyzeProject,
   deleteProject,
   detectAdapter,
+  getAdapterGenJob,
   getOnboarding,
   rescanProject,
   runGate1,
@@ -15,6 +16,7 @@ import {
   setGate2Driver,
   setGate2NotApplicable,
   setLevelsRoot,
+  startAdapterGen,
   updateOnboardingStep,
   uploadPlugin,
   type AdapterDetectResult,
@@ -407,6 +409,44 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     }
   }
 
+  // 双入口之一（面向策划）：平台内自动生成——后台任务 + 2s 轮询进度；成功即完成③（自动门1）
+  const genTimer = useRef<number | null>(null)
+  const doPlatformGen = async () => {
+    setBusy(true)
+    setError('')
+    setGenError('')
+    setGenSummary('')
+    try {
+      const { jobId } = await startAdapterGen(game.gameId)
+      setGenStatus('running')
+      setGenStage('准备')
+      const timer = window.setInterval(async () => {
+        try {
+          const snap = await getAdapterGenJob(jobId)
+          setGenStage(snap.stage)
+          setGenRound(snap.round)
+          if (snap.status !== 'running') {
+            window.clearInterval(timer)
+            genTimer.current = null
+            setGenStatus(snap.status === 'succeeded' ? 'done' : 'failed')
+            if (snap.status === 'failed') setGenError(snap.error ?? snap.report?.summary ?? '生成失败')
+            else setGenSummary(snap.report?.summary ?? '')
+            if (snap.status === 'succeeded' && snap.report?.gate1Passed) {
+              await markStep(3, 'done', `平台内生成适配层并过门1（${snap.report.rounds} 轮）`)
+              onStatusChanged()
+            }
+          }
+        } catch { /* 轮询失败下轮重试 */ }
+      }, 2000)
+      genTimer.current = timer
+    } catch (e) {
+      setGenStatus('failed')
+      setGenError((e as Error).message)
+      setBusy(false)
+    }
+  }
+  useEffect(() => () => { if (genTimer.current !== null) window.clearInterval(genTimer.current) }, [])
+
   const gate3Zones = gate3 ? groupGate3(gate3.rows) : null
 
   // ③"开始生成适配层"引导卡展开态
@@ -414,6 +454,12 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   const [pluginFile, setPluginFile] = useState<File | null>(null)
   const [uploadedName, setUploadedName] = useState('')
   const [detectResult, setDetectResult] = useState<AdapterDetectResult | null>(null)
+  // 平台内自动生成（双入口之一，面向策划）：后台任务 + 轮询进度
+  const [genStatus, setGenStatus] = useState<'idle' | 'running' | 'done' | 'failed'>('idle')
+  const [genStage, setGenStage] = useState('')
+  const [genRound, setGenRound] = useState(0)
+  const [genError, setGenError] = useState('')
+  const [genSummary, setGenSummary] = useState('')
 
   // 顺序解锁（一步接一步）：①完成→②解锁；②完成/受阻→③解锁；④⑤⑥需适配层就绪
   const step1Done = statusOf(1) === 'done'
@@ -639,72 +685,94 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
           ) : !game.adapterReady ? (
             <div className="adapter-launch">
               <h4>开始生成「{game.displayName}」的求解器适配层</h4>
-              <div className="dialog-note">
-                三步操作：①复制需求包交给 AI 编程助手 → ②它产出适配层文件后在本页上传 → ③点检测验收（自动装载并跑门1）。
-                全程不需要改工具代码、不需要跑构建命令。
-              </div>
-              {!launchOpen ? (
-                <button className="primary" onClick={() => { setLaunchOpen(true); void copyPrompt() }}>
-                  第①步 · 开始生成适配层（复制需求包给 AI 助手）
-                </button>
-              ) : (
-                <div className="adapter-handoff">
-                  <ol>
-                    <li>需求包已复制到剪贴板——粘贴给你的 AI 编程助手（ZCode / Cursor 等）执行；<button className="import-recent-item" onClick={() => void copyPrompt()}>再次复制</button>{copied && <span className="ok-inline"> 已复制</span>}</li>
-                    <li>它会按需求包产出适配层插件文件（.dll）。</li>
-                    <li>把产出的 DLL 文件在下方上传，然后点「检测并验收」。</li>
-                  </ol>
-                  <details>
-                    <summary className="import-recent-item" style={{ display: 'inline-block' }}>查看需求包全文</summary>
-                    <pre className="adapter-guide-prompt">{adapterPrompt}</pre>
-                  </details>
+              <div className="dialog-note">两条路径任选其一，产物都经过同一套验收（自动门1 + ④人工审核）：</div>
+
+              {/* 入口一：平台内自动生成（面向策划——一个按钮闭环） */}
+              <div className="gen-entry">
+                <div className="gen-entry-head">
+                  <b>路径 A · 平台内自动生成</b>
+                  <span className="dialog-note">推荐：使用设置页配置的模型，全程本页完成，无需任何外部工具</span>
                 </div>
-              )}
-              <div className="ob-form-row" style={{ marginTop: 12 }}>
-                <input
-                  type="file"
-                  accept=".dll"
-                  onChange={(e) => setPluginFile(e.target.files?.[0] ?? null)}
-                  title="选择 AI 助手产出的适配层 .dll 文件"
-                />
-                <button
-                  onClick={() => pluginFile && void doUploadPlugin(pluginFile)}
-                  disabled={!pluginFile || busy}
-                >
-                  {busy ? '上传中…' : '第②步 · 上传适配层文件'}
-                </button>
-                <button
-                  className="primary"
-                  onClick={() => void doDetect()}
-                  disabled={busy}
-                >
-                  {busy ? '检测中…' : '第③步 · 检测并验收适配层（自动跑门1）'}
-                </button>
+                {genStatus === 'running' ? (
+                  <div className="gen-progress">
+                    <div>深度生成中…（第 {genRound || 1}/{4} 轮 · {genStage}）</div>
+                    <div className="gen-progress-sub">模型推理 + 编译验证需要几分钟，请勿关闭页面；失败会给出转外部路径的建议</div>
+                  </div>
+                ) : (
+                  <button className="primary" onClick={() => void doPlatformGen()} disabled={busy}>
+                    {genStatus === 'failed' ? '重新尝试平台内生成' : '生成适配层（平台内自动）'}
+                  </button>
+                )}
+                {genError && <div className="error">{genError}</div>}
+                {genSummary && <div className="gate1-notes">总结：{genSummary}</div>}
+                {genStatus === 'done' && (
+                  <div className="ok-message">适配层已生成并通过门1 ✓——可直接继续④⑤⑥验收；建议检查④清单中 AI 初稿条目。</div>
+                )}
               </div>
-              {uploadedName && <div className="ok-message">已接收适配层文件：{uploadedName}</div>}
-              {detectResult && (
-                <div className={`gate1-verdict ${detectResult.gate1Passed ? 'ok' : 'bad'}`} style={{ marginTop: 10 }}>
-                  {detectResult.gate1Passed
-                    ? `适配层已接入并通过门1 ✓（${detectResult.displayName} v${detectResult.adapterVersion}）`
-                    : `适配层已装载但门1未通过——见下方检查卡；修复后重新上传并检测。${detectResult.gate1Message}`}
+
+              <div className="dialog-note" style={{ textAlign: 'center', margin: '4px 0' }}>—— 或者 ——</div>
+
+              {/* 入口二：需求包 → 外部编程助手（面向有编程助手的用户，保上限） */}
+              <div className="gen-entry">
+                <div className="gen-entry-head">
+                  <b>路径 B · 需求包（给外部 AI 编程助手）</b>
+                  <span className="dialog-note">适合：有 ZCode / Cursor 等编程助手的用户——用更强的模型与多轮协作拉高适配层质量上限</span>
                 </div>
-              )}
-              {detectResult?.gate1Report && (
-                <div className="gate1-cards">
-                  {Object.entries(detectResult.gate1Report).map(([name, result]) => (
-                    <div key={name} className={`gate1-card ${result.passed ? 'ok' : 'bad'}`}>
-                      <div className="gate1-card-head">
-                        <span className="gate1-mark">{result.passed ? '✓' : '✗'}</span>
-                        <span className="gate1-name">{name}</span>
+                {!launchOpen ? (
+                  <button onClick={() => { setLaunchOpen(true); void copyPrompt() }}>
+                    第①步 · 复制需求包给外部编程助手
+                  </button>
+                ) : (
+                  <div className="adapter-handoff">
+                    <ol>
+                      <li>需求包已复制到剪贴板——粘贴给你的 AI 编程助手执行；<button className="import-recent-item" onClick={() => void copyPrompt()}>再次复制</button>{copied && <span className="ok-inline"> 已复制</span>}</li>
+                      <li>它会按需求包产出适配层插件文件（.dll）。</li>
+                    </ol>
+                    <details>
+                      <summary className="import-recent-item" style={{ display: 'inline-block' }}>查看需求包全文</summary>
+                      <pre className="adapter-guide-prompt">{adapterPrompt}</pre>
+                    </details>
+                  </div>
+                )}
+                <div className="ob-form-row" style={{ marginTop: 8 }}>
+                  <input
+                    type="file"
+                    accept=".dll"
+                    onChange={(e) => setPluginFile(e.target.files?.[0] ?? null)}
+                    title="选择外部 AI 助手产出的适配层 .dll 文件"
+                  />
+                  <button onClick={() => pluginFile && void doUploadPlugin(pluginFile)} disabled={!pluginFile || busy}>
+                    {busy ? '上传中…' : '第②步 · 上传适配层文件'}
+                  </button>
+                  <button className="primary" onClick={() => void doDetect()} disabled={busy}>
+                    {busy ? '检测中…' : '第③步 · 检测并验收（自动跑门1）'}
+                  </button>
+                </div>
+                {uploadedName && <div className="ok-message">已接收适配层文件：{uploadedName}</div>}
+                {detectResult && (
+                  <div className={`gate1-verdict ${detectResult.gate1Passed ? 'ok' : 'bad'}`} style={{ marginTop: 10 }}>
+                    {detectResult.gate1Passed
+                      ? `适配层已接入并通过门1 ✓（${detectResult.displayName} v${detectResult.adapterVersion}）`
+                      : `适配层已装载但门1未通过——见下方检查卡；修复后重新上传并检测。${detectResult.gate1Message}`}
+                  </div>
+                )}
+                {detectResult?.gate1Report && (
+                  <div className="gate1-cards">
+                    {Object.entries(detectResult.gate1Report).map(([name, result]) => (
+                      <div key={name} className={`gate1-card ${result.passed ? 'ok' : 'bad'}`}>
+                        <div className="gate1-card-head">
+                          <span className="gate1-mark">{result.passed ? '✓' : '✗'}</span>
+                          <span className="gate1-name">{name}</span>
+                        </div>
+                        {result.issues.length > 0 && (
+                          <ul className="gate1-issues">{result.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
+                        )}
+                        {result.notes.length > 0 && <div className="gate1-notes">{result.notes.join('；')}</div>}
                       </div>
-                      {result.issues.length > 0 && (
-                        <ul className="gate1-issues">{result.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
-                      )}
-                      {result.notes.length > 0 && <div className="gate1-notes">{result.notes.join('；')}</div>}
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <>

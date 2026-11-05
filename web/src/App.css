@@ -248,6 +248,12 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .profile-table th { background: var(--surface-2); color: var(--text-muted); }
 
+/* 适配层生成双入口（三轮 D9） */
+.gen-entry { border: 1px solid var(--border-soft); border-radius: 10px; padding: 12px 14px; margin: 8px 0; }
+.gen-entry-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 8px; }
+.gen-progress { padding: 8px 10px; background: var(--surface-2); border-radius: 8px; font-size: 13px; }
+.gen-progress-sub { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+
 /* ---- 执行确认卡 ---- */
 .confirmation-card { width: 100%; max-width: 760px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
 .confirmation-card h4 { margin: 0 0 10px; font-size: 14px; }

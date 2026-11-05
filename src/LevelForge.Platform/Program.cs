@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LevelForge.Platform.Adoption;
+using LevelForge.Platform.AdapterGen;
 using LevelForge.Platform.Api;
 using LevelForge.Platform.Database;
 using LevelForge.Platform.Facades;
@@ -21,6 +22,8 @@ var database = new AppDatabase(dataDir);
 builder.Services.AddSingleton(database);
 builder.Services.AddSingleton(GameRegistry.Instance);   // 注册表：内置玩法编译期注册 + 插件玩法运行期装载（三轮 D7 解冻）
 builder.Services.AddSingleton<PluginLoader>();  // 适配层插件装载器（数据目录 plugins/{gameId}/）
+builder.Services.AddSingleton<AdapterGenRunner>();   // 生成执行器（生成→编译→回喂循环）
+builder.Services.AddSingleton<AdapterGenJobService>();  // 适配层平台内生成（三轮 D9 解冻：生成→编译→回喂循环）
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<GameStore>();
 builder.Services.AddSingleton<SolveRunStore>();

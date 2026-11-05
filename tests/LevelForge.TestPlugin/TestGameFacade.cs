@@ -13,12 +13,16 @@ public sealed class TestGameFacade : IGameFacade
 {
     public const string GameIdValue = "test-plugin";
 
+    // 指纹只算一次（静态缓存）：程序集文件可能随临时目录清理而消失，
+    // 全局注册表中的 Registration 在进程生命周期内仍会被种子流程访问——不能每次重读文件
+    private static readonly string CachedHash = AdapterFingerprint.Of(typeof(TestGameFacade).Assembly);
+
     public GameRegistration Registration => new(
         GameIdValue,
         "测试插件玩法",
         GameStatus.Trial,
         "1.0.0",
-        AdapterFingerprint.Of(typeof(TestGameFacade).Assembly),
+        CachedHash,
         TapeConstants.KernelVersion,
         TapeConstants.ContractVersion,
         "levels/test-plugin",

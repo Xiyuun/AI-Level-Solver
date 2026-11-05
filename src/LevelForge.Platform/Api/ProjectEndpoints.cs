@@ -1,3 +1,4 @@
+using LevelForge.Platform.AdapterGen;
 using LevelForge.Platform.Database;
 using LevelForge.Platform.Facades;
 using LevelForge.Platform.Plugins;
@@ -32,6 +33,31 @@ public static class ProjectEndpoints
                     ? Results.Conflict(new { message = ex.Message })
                     : Results.BadRequest(new { message = ex.Message });
             }
+        });
+
+        // 平台内生成适配层（三轮 D9 解冻：后台任务——生成→编译→错误回喂循环≤4轮→装载→自动门1）
+        app.MapPost("/api/games/{gameId}/adapter-gen", (string gameId, AdapterGenJobService genJobs,
+            GameStore games, GameRegistry registry) =>
+        {
+            if (games.FindGame(gameId) is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            if (registry.TryGet(gameId, out _))
+            {
+                return Results.Conflict(new { message = "该玩法适配层已接入：如需重新生成请先删除项目后重新导入" });
+            }
+            var job = genJobs.Start(gameId);
+            return Results.Accepted($"/api/adapter-gen/{job.JobId}", new { jobId = job.JobId });
+        });
+
+        // 生成任务快照（轮询消费）
+        app.MapGet("/api/adapter-gen/{jobId:long}", (long jobId, AdapterGenJobService genJobs) =>
+        {
+            var snap = genJobs.Get(jobId);
+            return snap is null
+                ? Results.NotFound(new { message = $"生成任务不存在：{jobId}" })
+                : Results.Ok(snap);
         });
 
         // 最近导入目录（前端快捷回填）

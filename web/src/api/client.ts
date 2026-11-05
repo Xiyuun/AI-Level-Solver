@@ -290,6 +290,33 @@ export const uploadPlugin = async (gameId: string, file: File): Promise<{ saved:
 export const detectAdapter = (gameId: string) =>
   sendJson<AdapterDetectResult>(`/api/games/${gameId}/plugins/detect`, 'POST')
 
+// 平台内生成适配层（三轮 D9 解冻：后台任务——生成→编译→错误回喂循环≤4轮→装载→自动门1）
+export interface AdapterGenSnapshot {
+  jobId: number
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled'
+  stage: string
+  round: number
+  elapsedMs: number
+  error: string | null
+  report: {
+    success: boolean
+    rounds: number
+    compiled: boolean
+    gate1Passed: boolean
+    gate1Message: string | null
+    error: string | null
+    workspaceDir: string
+    pluginsDir: string
+    summary: string
+  } | null
+  events: { seq: number; elapsedMs: number; stage: string; message: string }[]
+}
+
+export const startAdapterGen = (gameId: string) =>
+  sendJson<{ jobId: number }>(`/api/games/${gameId}/adapter-gen`, 'POST')
+export const getAdapterGenJob = (jobId: number) =>
+  getJson<AdapterGenSnapshot>(`/api/adapter-gen/${jobId}`)
+
 // 求解与磁带
 export const listLevels = (gameId: string) => getJson<LevelRow[]>(`/api/games/${gameId}/levels`)
 export const solveLevel = (gameId: string, levelId: string) =>

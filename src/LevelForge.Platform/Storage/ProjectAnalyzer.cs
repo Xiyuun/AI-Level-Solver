@@ -108,8 +108,8 @@ public sealed class ProjectAnalyzer(LlmClient llm, SettingsStore settings, GameS
             """;
     }
 
-    // 机器事实段：来自扫描画像（观察 + 全量 schema 摘要）
-    private static string BuildFacts(string displayName, string gameId, string root, string engine, ProjectProfile profile)
+    // 机器事实段：来自扫描画像（观察 + 全量 schema 摘要）；供深度分析与适配层生成共用（公开静态）
+    public static string BuildFacts(string displayName, string gameId, string root, string engine, ProjectProfile profile)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# 项目事实（平台扫描，机器可验证）");
@@ -128,8 +128,8 @@ public sealed class ProjectAnalyzer(LlmClient llm, SettingsStore settings, GameS
         return sb.ToString();
     }
 
-    // 代码抽样：按引擎扩展名取前 N 个源码文件，各截断前 120 行（确定性采样，无 agent）
-    private static string SampleCode(string root, string engine)
+    // 代码抽样：按引擎扩展名取前 N 个源码文件，各截断前 120 行（确定性采样，无 agent）；供深度分析与适配层生成共用
+    public static string SampleCode(string root, string engine)
     {
         string[] exts = engine == "unity" ? ["*.cs"] : ["*.ts", "*.js"];
         var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules", "library", "temp", "build", "dist", ".git", "extensions", "settings" };
