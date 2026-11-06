@@ -58,72 +58,66 @@ public sealed class AdapterGenTests
     }
 
     // 产出能通过编译且过门1的最小门面源文件（GameId 按导入目录名 slug 动态绑定）
-    private static object FacadeFiles(string gameId) => new
-    {
-        files = new[]
+    // 输出格式与运行器契约一致：FILE 标记切分（c1289e3 起运行器只认标记，不再收 JSON files 数组）
+    private static string FacadeFiles(string gameId) => """
+        // ==== FILE: __GAMEID__Facade.cs ====
+        using LevelForge.Kernel.Analysis;
+        using LevelForge.Kernel.Contracts;
+        using LevelForge.Kernel.Hosting;
+        using LevelForge.Kernel.Replay;
+        using LevelForge.Platform.Facades;
+        using System.Text.Json.Nodes;
+
+        namespace Gen;
+
+        public sealed class GenFacade : IGameFacade
         {
-            new
+            public GameRegistration Registration => new(
+                "__GAMEID__", "生成的测试玩法", "trial", "1.0.0",
+                AdapterFingerprint.Of(typeof(GenFacade).Assembly),
+                TapeConstants.KernelVersion, TapeConstants.ContractVersion,
+                "levels/gen", false, "{}", "{}", "生成玩法", "{}", "", "{}");
+
+            public IReadOnlyList<string> BuiltinLevels => Array.Empty<string>();
+
+            public string? TryGetLevelId(string levelJson)
             {
-                name = $"{gameId}Facade.cs",
-                content = $$"""
-                    using LevelForge.Kernel.Analysis;
-                    using LevelForge.Kernel.Contracts;
-                    using LevelForge.Kernel.Hosting;
-                    using LevelForge.Kernel.Replay;
-                    using LevelForge.Platform.Facades;
-                    using System.Text.Json.Nodes;
+                try { return JsonNode.Parse(levelJson)?["levelId"]?.ToString(); }
+                catch (System.Text.Json.JsonException) { return null; }
+            }
 
-                    namespace Gen;
+            public IReadOnlyList<string> FormatErrors(string levelJson) => Array.Empty<string>();
 
-                    public sealed class GenFacade : IGameFacade
-                    {
-                        public GameRegistration Registration => new(
-                            "{{gameId}}", "生成的测试玩法", "trial", "1.0.0",
-                            AdapterFingerprint.Of(typeof(GenFacade).Assembly),
-                            TapeConstants.KernelVersion, TapeConstants.ContractVersion,
-                            "levels/gen", false, "{}", "{}", "生成玩法", "{}", "", "{}");
+            public PlatformSolve Solve(SolveCommand command)
+            {
+                var result = new SolveResult(SolveStatus.Invalid, Optimality.NotApplicable, false,
+                    TerminationReason.InvalidInput, MetricsScope.ExpandedPrefix, [], null, "生成测试");
+                var difficulty = new DifficultyAssessment(0, 0, "gen-v1", [], []);
+                return new PlatformSolve(result, null, difficulty, null);
+            }
 
-                        public IReadOnlyList<string> BuiltinLevels => Array.Empty<string>();
+            public ComplianceReport RunGate1Checks()
+            {
+                return new ComplianceReport(
+                    ComplianceResult.Pass(ComplianceCheckKind.DependencyScan, ["生成测试"]),
+                    ComplianceResult.Pass(ComplianceCheckKind.StateKeyDiscrimination),
+                    ComplianceResult.Pass(ComplianceCheckKind.Purity),
+                    ComplianceResult.Pass(ComplianceCheckKind.Determinism),
+                    ComplianceResult.Pass(ComplianceCheckKind.KernelSelfTest));
+            }
 
-                        public string? TryGetLevelId(string levelJson)
-                        {
-                            try { return JsonNode.Parse(levelJson)?["levelId"]?.ToString(); }
-                            catch (System.Text.Json.JsonException) { return null; }
-                        }
+            public PlayState Play(string levelJson, IReadOnlyList<JsonNode> moves)
+                => throw new PlayException("生成测试不实现试玩");
+        }
+        // ==== END FILE ====
+        """.Replace("__GAMEID__", gameId);
 
-                        public IReadOnlyList<string> FormatErrors(string levelJson) => Array.Empty<string>();
-
-                        public PlatformSolve Solve(SolveCommand command)
-                        {
-                            var result = new SolveResult(SolveStatus.Invalid, Optimality.NotApplicable, false,
-                                TerminationReason.InvalidInput, MetricsScope.ExpandedPrefix, [], null, "生成测试");
-                            var difficulty = new DifficultyAssessment(0, 0, "gen-v1", [], []);
-                            return new PlatformSolve(result, null, difficulty, null);
-                        }
-
-                        public ComplianceReport RunGate1Checks()
-                        {
-                            return new ComplianceReport(
-                                ComplianceResult.Pass(ComplianceCheckKind.DependencyScan, ["生成测试"]),
-                                ComplianceResult.Pass(ComplianceCheckKind.StateKeyDiscrimination),
-                                ComplianceResult.Pass(ComplianceCheckKind.Purity),
-                                ComplianceResult.Pass(ComplianceCheckKind.Determinism),
-                                ComplianceResult.Pass(ComplianceCheckKind.KernelSelfTest));
-                        }
-
-                        public PlayState Play(string levelJson, IReadOnlyList<JsonNode> moves)
-                            => throw new PlayException("生成测试不实现试玩");
-                    }
-                    """,
-            },
-        },
-    };
-
-    // 第一轮坏代码（编译错误：缺少 usings 与接口实现）
-    private static object BrokenFiles() => new
-    {
-        files = new[] { new { name = "Broken.cs", content = "this is not valid c#;" } },
-    };
+    // 第一轮坏代码（编译错误：缺少 usings 与接口实现）——同样走 FILE 标记格式
+    private static string BrokenFiles() => """
+        // ==== FILE: Broken.cs ====
+        this is not valid c#;
+        // ==== END FILE ====
+        """;
 
     [Fact]
     public async Task 平台内生成_未配置模型_给可操作错误()
@@ -164,8 +158,7 @@ public sealed class AdapterGenTests
     {
         var projectDir = MakeCocosProject("gen-ok");
         var gameId = "gen-ok";
-        var good = JsonSerializer.Serialize(FacadeFiles(gameId), Json);
-        using var factory = FactoryWithLlm([JsonSerializer.Serialize(BrokenFiles(), Json), good]);
+        using var factory = FactoryWithLlm([BrokenFiles(), FacadeFiles(gameId)]);
         var client = factory.CreateClient();
         try
         {

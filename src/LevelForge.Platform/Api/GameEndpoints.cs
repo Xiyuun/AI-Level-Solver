@@ -33,7 +33,8 @@ public static class GameEndpoints
                 registry.TryGet(g.Id, out _), g.EngineType, g.ProjectRoot,
                 g.ProjectProfileJson is null ? null : ParseJson(g.ProjectProfileJson),
                 g.ProjectAnalysisJson is null ? null : ParseJson(g.ProjectAnalysisJson),
-                g.ProjectRoot is null ? null : Path.Combine(db.DataDir, "plugins", g.Id)));
+                g.ProjectRoot is null ? null : Path.Combine(db.DataDir, "plugins", g.Id),
+                g.CodeRoot));
         });
 
         // 当前活跃玩法

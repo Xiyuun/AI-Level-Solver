@@ -48,7 +48,9 @@ public sealed class AdapterGenRunner(
 
         var profile = ProjectScanner.FromJson(game.ProjectProfileJson) ?? ProjectScanner.Scan(root, engine);
         var facts = ProjectAnalyzer.BuildFacts(game.DisplayName, game.Id, root, engine, profile);
-        var codeSamples = ProjectAnalyzer.SampleCode(root, engine);
+        // 玩法代码全文（向导①确认的 codeRoot 优先）：生成预算读设置（默认 300K）——求解器对规则完整性的要求最高
+        var genBudget = Math.Clamp(settings.Get("gen.codeBudgetChars", 300_000) <= 0 ? 300_000 : settings.Get("gen.codeBudgetChars", 300_000), 20_000, 2_000_000);
+        var codeSamples = ProjectAnalyzer.SampleCode(root, engine, game.CodeRoot, maxChars: genBudget);
         var analysisText = BuildAnalysisText(game.ProjectAnalysisJson);
         var binDir = AppContext.BaseDirectory;   // 契约/内核 DLL 所在（平台运行目录）
 
@@ -280,7 +282,8 @@ public sealed class AdapterGenRunner(
             var nameStart = rest.IndexOf(':', startIdx + startMark.Length - 1) + 1;
             var lineEnd = rest.IndexOf('\n', startIdx);
             if (lineEnd < 0) { parseError = "FILE 标记未闭合"; break; }
-            var name = rest[nameStart..lineEnd].Trim();
+            // 文件名 = FILE: 与行尾之间的内容；剥掉提示词格式里的尾部 "===="（如 "// ==== FILE: Foo.cs ===="）
+            var name = rest[nameStart..lineEnd].Trim().TrimEnd('=').Trim();
             var bodyStart = lineEnd + 1;
             var endIdx = rest.IndexOf(endMark, bodyStart, StringComparison.Ordinal);
             if (endIdx < 0) { parseError = $"文件 {name} 缺少 END FILE 标记"; break; }

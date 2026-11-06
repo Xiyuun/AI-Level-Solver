@@ -22,7 +22,7 @@ public sealed record GameDetailDto(
     string GameBrief, string FormatSpec, string RuleMatrix,
     string RegisteredAt, string UpdatedAt,
     bool AdapterReady, string? EngineType, string? ProjectRoot, JsonNode? ProjectProfile, JsonNode? ProjectAnalysis,
-    string? PluginsRoot);
+    string? PluginsRoot, string? CodeRoot);
 
 // 当前活跃玩法
 public sealed record ActiveGameDto(string GameId);
@@ -224,13 +224,17 @@ public sealed record ProjectRescanResultDto(string GameId, string EngineType, st
 // 关卡根目录确认请求（向导①：用户从扫描候选中选定）
 public sealed record LevelsRootRequestDto(string? LevelsRoot);
 
-// 深度分析结论 DTO（向导②：四问初稿/机制/清单初稿/风险——全部待用户审核确认）
+// 玩法代码根目录确认请求（向导①：用户确认"规则承载代码"位置）
+public sealed record CodeRootRequestDto(string? CodeRoot);
+
+// 深度分析结论 DTO（向导②：四问初稿/机制/清单初稿/风险/卫生度分级/工作量预估——全部待用户审核确认）
 public sealed record ProjectAnalysisDto(
     string AnalyzedAt, string Model,
     IReadOnlyList<QualificationAnswerDto> FourQuestions,
     IReadOnlyList<string> Mechanics,
     IReadOnlyList<ChecklistDraftDto> ChecklistDraft,
-    IReadOnlyList<string> Risks, string Summary);
+    IReadOnlyList<string> Risks, string Summary,
+    string HygieneGrade, string WorkEstimate);
 
 public sealed record QualificationAnswerDto(string Question, string Answer, string Evidence);
 

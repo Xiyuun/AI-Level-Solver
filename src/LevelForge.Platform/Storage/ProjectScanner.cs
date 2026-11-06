@@ -12,7 +12,8 @@ public sealed record ProjectProfile(
     IReadOnlyList<LevelDirCandidate> LevelDirCandidates,
     IReadOnlyList<SampleFile> SampleFiles,
     IReadOnlyList<string> Observations,
-    IReadOnlyList<SchemaSummary>? SchemaSummaries = null);
+    IReadOnlyList<SchemaSummary>? SchemaSummaries = null,
+    IReadOnlyList<CodeDirCandidate>? CodeDirCandidates = null);
 
 // 一个候选目录的全量 schema 事实：对目录内全部（≤100 个）可解析 JSON 做聚合
 public sealed record SchemaSummary(
@@ -31,6 +32,12 @@ public sealed record LevelDirCandidate(
     int JsonCount,              // 该目录直接含有的 JSON 文件数
     string NamingHint);         // 命名聚簇提示（numbered=纯数字、levelPrefixed=前缀+编号、mixed）
 
+// 玩法代码目录候选：按"子树内源码文件数量"排序（玩法代码是层级结构，按子树计数而非单层）
+// 只提名事实（目录+源码文件数），语义判断（哪里是玩法代码）由用户在向导①确认
+public sealed record CodeDirCandidate(
+    string Directory,           // 相对项目根目录
+    int SourceFileCount);       // 子树内源码文件数（.cs / .ts / .js，已跳过插件目录）
+
 // 抽样关卡文件：只记录机器事实（顶层键/大小/是否可解析），不猜测语义
 public sealed record SampleFile(
     string Path,                // 相对项目根目录
@@ -43,9 +50,11 @@ public sealed record SampleFile(
 // 用途：①登记预填关卡根目录 ②资格评估的机器事实区 ③需求包内嵌样例原文 ④按项目生成审核清单初稿
 public static class ProjectScanner
 {
-    private const int MaxDepth = 5;            // 相对深度上限（防止扫到引擎 SDK/库目录深处）
-    private const int MaxJsonFiles = 2000;     // JSON 文件扫描上限（大项目防爆炸）
-    private static readonly string[] SkipDirs = ["node_modules", "library", "temp", "packages", "settings", "build", "dist", ".git", "bin", "obj", "extensions"];
+    private const int MaxDepth = 5;            // 相对深度上限（防止扫到引擎 SDK/库目录深处；JSON 扫描用）
+    private const int MaxSourceDepth = 12;     // 源码收集深度上限（玩法代码树嵌套深，如 Assets/Main/Game/Modules/X/Model/…；插件等噪声目录已在 SkipDirs 排除）
+    private const int MaxJsonFiles = 2000;     // JSON/源码文件扫描上限（大项目防爆炸）
+    private static readonly string[] SkipDirs = ["node_modules", "library", "temp", "packages", "settings", "build", "dist", ".git", "bin", "obj", "extensions",
+        "plugins", "plugin", "thirdparty", "third_party"];   // 插件/三方库：玩法代码候选与代码抽样一律忽略
 
     public static ProjectProfile Scan(string projectRoot, string engine)
     {
@@ -53,9 +62,10 @@ public static class ProjectScanner
         var candidates = RankLevelDirs(jsons);
         var samples = SampleFiles(projectRoot, candidates, jsons);
         var schemas = SchemaSummaries(projectRoot, candidates);
+        var codeCandidates = RankCodeDirs(projectRoot, engine);
         var observations = BuildObservations(engine, candidates, samples, jsons.Count, schemas);
         return new ProjectProfile(
-            AppDatabase.UtcNowIso, projectRoot, engine, candidates, samples, observations, schemas);
+            AppDatabase.UtcNowIso, projectRoot, engine, candidates, samples, observations, schemas, codeCandidates);
     }
 
     // 序列化/反序列化（games.project_profile_json 存取口径）
@@ -153,6 +163,121 @@ public static class ProjectScanner
             && long.TryParse(n.TrimStart().Substring(n.IndexOfAny(['-', '_', ' ']) is var idx && idx > 0 ? idx + 1 : n.Length), out _));
         if (prefixed >= names.Count * 0.8) return "levelPrefixed";
         return "mixed";
+    }
+
+    // 玩法代码目录候选（确定性，无语义判断）：按引擎扩展名收集源码文件（跳过插件/三方库），
+    // 对深度 2~3 的目录统计"子树内源码文件数"，数量 ≥5 的目录按数量排序取前 5。
+    // 提名只是事实——哪一个是玩法代码由用户确认（诚实语义：工具不替用户猜规则边界）
+    internal static List<CodeDirCandidate> RankCodeDirs(string root, string engine)
+    {
+        var exts = engine == "unity" ? new[] { ".cs" } : new[] { ".ts", ".js" };
+        var sourceRoot = SourceRoot(root, engine);
+        var sourceFiles = CollectSourceFiles(sourceRoot, exts);
+        if (sourceFiles.Count == 0) return [];
+
+        // 候选目录统一用相对项目根的路径（与关卡目录候选同口径，前端直接展示）
+        var sourceRootRel = Path.GetRelativePath(root, sourceRoot).Replace('\\', '/');
+        var sourcePrefix = sourceRootRel == "." ? "" : sourceRootRel + "/";
+
+        // 候选 = 源码文件的全部祖先目录（深度窗口内）——纯容器目录（文件全在子目录）也是合法玩法根，
+        // 只统计"直接含文件的目录"会把层级结构的玩法根漏掉（piggyfarm 的 Assets/Main/Game 实测隐身）
+        var ancestors = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var f in sourceFiles)
+        {
+            var d = Path.GetDirectoryName(f.Rel)?.Replace('\\', '/') ?? "";
+            while (true)
+            {
+                ancestors.Add(d);
+                if (d.Length == 0) break;
+                var idx = d.LastIndexOf('/');
+                d = idx > 0 ? d[..idx] : "";
+            }
+        }
+        var relDepth = RelativeDepth(sourceRoot, root);
+        var result = new List<CodeDirCandidate>();
+        foreach (var dir in ancestors)
+        {
+            var depth = dir.Length == 0 ? 0 : dir.Count(c => c == '/') + 1;
+            var absoluteDepth = relDepth + depth;   // 相对项目根的真实层级
+            if (absoluteDepth < 2 || absoluteDepth > 4) continue;   // 太浅=引擎根/Assets 本身，太深=碎片目录
+            var prefix = dir.Length == 0 ? "" : dir + "/";
+            var count = sourceFiles.Count(f =>
+            {
+                var d = Path.GetDirectoryName(f.Rel)?.Replace('\\', '/') ?? "";
+                return d == dir || d.StartsWith(prefix, StringComparison.Ordinal);
+            });
+            if (count >= 5)
+            {
+                result.Add(new CodeDirCandidate(sourcePrefix + dir, count));
+            }
+        }
+        return result
+            .OrderByDescending(c => c.SourceFileCount)
+            .ThenBy(c => c.Directory, StringComparer.Ordinal)   // 同数按路径字典序（确定性）
+            .Take(5)
+            .ToList();
+    }
+
+    // 引擎源码根：unity=Assets，cocos=assets；不存在时退回项目根本身（如实降级）
+    internal static string SourceRoot(string root, string engine)
+    {
+        var name = engine == "unity" ? "Assets" : "assets";
+        var dir = Path.Combine(root, name);
+        return Directory.Exists(dir) ? dir : root;
+    }
+
+    // 源码文件收集（相对 sourceRoot 的路径 + 大小）：跳过 SkipDirs（含 Plugins），限深限量
+    internal static List<(string Rel, long Bytes)> CollectSourceFiles(string sourceRoot, string[] exts)
+    {
+        var result = new List<(string, long)>();
+        var stack = new Stack<(string Dir, int Depth)>();
+        stack.Push((sourceRoot, 0));
+        while (stack.Count > 0 && result.Count < MaxJsonFiles)
+        {
+            var (dir, depth) = stack.Pop();
+            if (depth > MaxSourceDepth) continue;
+            IEnumerable<string> entries;
+            try
+            {
+                entries = Directory.EnumerateFileSystemEntries(dir);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+            foreach (var entry in entries)
+            {
+                var name = Path.GetFileName(entry);
+                if (File.GetAttributes(entry).HasFlag(System.IO.FileAttributes.Directory))
+                {
+                    if (!SkipDirs.Contains(name.ToLowerInvariant()))
+                    {
+                        stack.Push((entry, depth + 1));
+                    }
+                    continue;
+                }
+                if (exts.Any(ext => name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+                    && !name.EndsWith(".d.ts", StringComparison.OrdinalIgnoreCase)
+                    && !name.Contains(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        result.Add((Path.GetRelativePath(sourceRoot, entry).Replace('\\', '/'), new FileInfo(entry).Length));
+                    }
+                    catch (IOException) { }
+                    if (result.Count >= MaxJsonFiles) break;
+                }
+            }
+        }
+        return result;
+    }
+
+    // sourceRoot 相对项目根的层级（Assets=1，项目根本身=0）
+    private static int RelativeDepth(string sourceRoot, string projectRoot)
+    {
+        var rel = Path.GetRelativePath(projectRoot, sourceRoot);
+        if (rel is "." or "") return 0;
+        return rel.Count(c => c is '/' or '\\') + 1;
     }
 
     // 抽样：每个候选目录取最小的 2 个 JSON 读出顶层键（小文件更可能是关卡而不是配置）

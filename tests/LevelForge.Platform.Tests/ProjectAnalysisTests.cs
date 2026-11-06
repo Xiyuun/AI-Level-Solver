@@ -116,6 +116,8 @@ public sealed class ProjectAnalysisTests
             mechanics = new[] { "消除：相邻同色牌配对消除" },
             checklistDraft = new[] { new { group = "A", text = "消除判定与本体一致" } },
             risks = new[] { "countdown 字段语义未明" },
+            hygieneGrade = "良好（规则状态集中在 LevelData，与场景弱耦合）",
+            workEstimate = "0.5~1 人日：数据外置且状态可序列化",
             summary = "接入难度低",
         }, Json);
         using var factory = FactoryWithLlm(new ScriptedLlm(analysisJson));
@@ -141,6 +143,8 @@ public sealed class ProjectAnalysisTests
             Assert.Equal(4, dto.FourQuestions.Count);
             Assert.Equal("test-model", dto.Model);
             Assert.Single(dto.ChecklistDraft);
+            Assert.Contains("良好", dto.HygieneGrade);
+            Assert.Contains("0.5~1 人日", dto.WorkEstimate);
 
             // 落库：玩法详情带分析结论
             var detail = JsonSerializer.Deserialize<Api.GameDetailDto>(

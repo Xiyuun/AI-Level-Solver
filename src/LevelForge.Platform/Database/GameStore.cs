@@ -6,6 +6,7 @@ namespace LevelForge.Platform.Database;
 // ProjectRoot/EngineType：仅导入的项目有值（静态注册玩法为 NULL，见 AppDatabase Migrate v2）
 // ProjectProfileJson：导入项目的扫描画像快照（v3，ProjectScanner 产出）
 // ProjectAnalysisJson：深度分析结论快照（v4，ProjectAnalyzer 产出，初稿语义待用户确认）
+// CodeRoot：玩法代码根目录（v5，向导①用户确认的"规则承载代码"位置；NULL=未确认走自动提名）
 public sealed record GameRow(
     string Id, string DisplayName, string Status,
     string AdapterVer, string AdapterHash, string KernelVer, string ContractVer,
@@ -14,6 +15,7 @@ public sealed record GameRow(
     string RuleMatrix, string DifficultyWeightsJson,
     string? Gate2DriverJson,
     string? ProjectRoot, string? EngineType, string? ProjectProfileJson, string? ProjectAnalysisJson,
+    string? CodeRoot,
     string RegisteredAt, string UpdatedAt, long LevelCount);
 
 // 关卡行：levels 表整行
@@ -127,6 +129,18 @@ public sealed class GameStore
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "UPDATE games SET levels_root = $root, updated_at = $now WHERE id = $id";
         cmd.Parameters.AddWithValue("$root", levelsRoot);
+        cmd.Parameters.AddWithValue("$now", AppDatabase.UtcNowIso);
+        cmd.Parameters.AddWithValue("$id", gameId);
+        return cmd.ExecuteNonQuery() == 1;
+    }
+
+    // 更新玩法代码根目录（向导①用户确认"规则承载代码"位置后回填；分析与生成从这里全文收录）
+    public bool UpdateCodeRoot(string gameId, string codeRoot)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE games SET code_root = $root, updated_at = $now WHERE id = $id";
+        cmd.Parameters.AddWithValue("$root", codeRoot);
         cmd.Parameters.AddWithValue("$now", AppDatabase.UtcNowIso);
         cmd.Parameters.AddWithValue("$id", gameId);
         return cmd.ExecuteNonQuery() == 1;
@@ -246,6 +260,7 @@ public sealed class GameStore
                 reader.IsDBNull(reader.GetOrdinal("engine_type")) ? null : reader.GetString(reader.GetOrdinal("engine_type")),
                 reader.IsDBNull(reader.GetOrdinal("project_profile_json")) ? null : reader.GetString(reader.GetOrdinal("project_profile_json")),
                 reader.IsDBNull(reader.GetOrdinal("project_analysis_json")) ? null : reader.GetString(reader.GetOrdinal("project_analysis_json")),
+                reader.IsDBNull(reader.GetOrdinal("code_root")) ? null : reader.GetString(reader.GetOrdinal("code_root")),
                 reader.GetString(reader.GetOrdinal("registered_at")),
                 reader.GetString(reader.GetOrdinal("updated_at")),
                 reader.GetInt64(reader.GetOrdinal("level_count"))));

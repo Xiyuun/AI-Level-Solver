@@ -82,8 +82,17 @@ public sealed class AppDatabase
             m.ExecuteNonQuery();
         }
 
+        if (current < 5)
+        {
+            // v5（四轮·玩法代码目录）：向导①用户确认的"规则承载代码"根目录。
+            // 深度分析与适配层生成的代码全文从这里收录（插件/三方库一律忽略）；NULL=未确认（自动提名）
+            using var m = conn.CreateCommand();
+            m.CommandText = "ALTER TABLE games ADD COLUMN code_root TEXT;";
+            m.ExecuteNonQuery();
+        }
+
         using var set = conn.CreateCommand();
-        set.CommandText = "PRAGMA user_version=4";
+        set.CommandText = "PRAGMA user_version=5";
         set.ExecuteNonQuery();
     }
 

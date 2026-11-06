@@ -98,6 +98,22 @@ public static class ProjectEndpoints
                 : Results.NotFound(new { message = $"未知玩法：{gameId}" });
         });
 
+        // 玩法代码根目录确认（向导①：用户确认"规则承载代码"位置——深度分析与适配层生成从这里全文收录）
+        app.MapPut("/api/games/{gameId}/code-root", (string gameId, CodeRootRequestDto body, GameStore games) =>
+        {
+            if (games.FindGame(gameId) is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            if (string.IsNullOrWhiteSpace(body.CodeRoot))
+            {
+                return Results.BadRequest(new { message = "缺少 codeRoot" });
+            }
+            return games.UpdateCodeRoot(gameId, body.CodeRoot.Trim())
+                ? Results.Ok(new { codeRoot = body.CodeRoot.Trim() })
+                : Results.NotFound(new { message = $"未知玩法：{gameId}" });
+        });
+
         // 上传适配层插件（向导③，面向策划：不要求会操作文件目录——本页直接上传 AI 产出的 DLL）
         app.MapPost("/api/games/{gameId}/plugins/upload", async (string gameId, PluginLoader loader,
             GameStore games, AppDatabase db, HttpContext http) =>
@@ -169,7 +185,7 @@ public static class ProjectEndpoints
                     report.AnalyzedAt, report.Model,
                     report.FourQuestions.Select(q => new QualificationAnswerDto(q.Question, q.Answer, q.Evidence)).ToList(),
                     report.Mechanics, report.ChecklistDraft.Select(c => new ChecklistDraftDto(c.Group, c.Text)).ToList(),
-                    report.Risks, report.Summary));
+                    report.Risks, report.Summary, report.HygieneGrade, report.WorkEstimate));
             }
             catch (ProjectAnalysisException ex)
             {

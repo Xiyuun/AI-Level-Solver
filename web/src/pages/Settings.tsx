@@ -18,6 +18,8 @@ export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: (
   const [candidateLimit, setCandidateLimit] = useState(3)
   const [solveTimeout, setSolveTimeout] = useState(30000)
   const [timeoutSeconds, setTimeoutSeconds] = useState(60)
+  const [analysisBudget, setAnalysisBudget] = useState(200000)
+  const [genBudget, setGenBudget] = useState(300000)
   const [theme, setTheme] = useState('light')
   const [testResult, setTestResult] = useState<{ ok: boolean; latencyMs: number; error: string | null; replyPreview: string | null } | null>(null)
   const [games, setGames] = useState<GameSummary[]>([])
@@ -33,6 +35,8 @@ export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: (
       setCandidateLimit(Number(settings['gen.candidateLimit'] ?? 3))
       setSolveTimeout(Number(settings['gen.solveTimeoutMs'] ?? 30000))
       setTimeoutSeconds(Number(settings['llm.timeoutSeconds'] ?? 60))
+      setAnalysisBudget(Number(settings['analyze.codeBudgetChars'] ?? 200000))
+      setGenBudget(Number(settings['gen.codeBudgetChars'] ?? 300000))
       setTheme(String(settings['ui.theme'] ?? 'light'))
       setGames(list)
     } catch (e) {
@@ -53,6 +57,8 @@ export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: (
         'llm.apiKey': apiKey,
         'llm.model': model.trim(),
         'llm.timeoutSeconds': timeoutSeconds,
+        'analyze.codeBudgetChars': analysisBudget,
+        'gen.codeBudgetChars': genBudget,
         'gen.candidateLimit': candidateLimit,
         'gen.solveTimeoutMs': solveTimeout,
         'ui.theme': theme,
@@ -125,6 +131,33 @@ export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: (
         <div className="note">
           快模型（flash 类）30~60s 够用；带思考链的模型生成密集关卡 JSON 时可能要 120s 以上。
           超时只影响单次模型调用，不影响求解器。
+        </div>
+        <label className="field">
+          深度分析·玩法代码正文预算（字符）
+          <input
+            type="number"
+            min={20000}
+            max={2000000}
+            step={10000}
+            value={analysisBudget}
+            onChange={(e) => setAnalysisBudget(Number(e.target.value) || 200000)}
+          />
+        </label>
+        <label className="field">
+          平台内生成·玩法代码正文预算（字符）
+          <input
+            type="number"
+            min={20000}
+            max={2000000}
+            step={10000}
+            value={genBudget}
+            onChange={(e) => setGenBudget(Number(e.target.value) || 300000)}
+          />
+        </label>
+        <div className="note">
+          玩法代码全文送入模型的上限（超出的文件以全量索引兜底并如实标注）。
+          按模型上下文窗口调：1M 窗口模型建议 20万~40万；小窗口模型过大反而会截断报错。
+          预算越大证据越全，但耗时与 token 费用同比例上涨。
         </div>
         <div className="form-actions">
           <button className="primary" onClick={() => void save()}>保存</button>

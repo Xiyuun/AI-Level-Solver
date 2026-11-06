@@ -30,6 +30,7 @@ export interface GameDetail extends GameSummary {
   projectProfile: ProjectProfile | null // 导入项目的扫描画像（关卡目录候选/抽样/机器观察）
   projectAnalysis: ProjectAnalysis | null // 深度分析结论初稿（平台内 LLM 产出，待用户审核确认）
   pluginsRoot: string | null // 该玩法的适配层插件目录（数据目录/plugins/{gameId}，内置玩法为 null）
+  codeRoot: string | null // 玩法代码根目录（向导①用户确认的"规则承载代码"位置；null=未确认走自动提名）
 }
 
 // 深度分析结论（三轮 N12 完整版 B：初稿语义，必须经用户审核/编辑）
@@ -41,6 +42,8 @@ export interface ProjectAnalysis {
   checklistDraft: { group: string; text: string }[]
   risks: string[]
   summary: string
+  hygieneGrade?: string // 代码卫生度分级（良好/一般/纠缠）——旧存档可能缺省
+  workEstimate?: string // 接入工作量预估（人日区间+依据）——旧存档可能缺省
 }
 
 // 项目扫描画像（三轮 N12：全部是机器可直接验证的事实）
@@ -51,6 +54,7 @@ export interface ProjectProfile {
   levelDirCandidates: { directory: string; jsonCount: number; namingHint: string }[]
   sampleFiles: { path: string; bytes: number; parsed: boolean; topLevelKeys: string | null; parseError: string | null }[]
   observations: string[]
+  codeDirCandidates: { directory: string; sourceFileCount: number }[] | null // 玩法代码目录候选（子树源码文件数排序，已跳过插件）
 }
 
 export interface LevelRow {
@@ -258,6 +262,10 @@ export const rescanProject = (gameId: string) =>
   sendJson<{ gameId: string; engineType: string; projectRoot: string }>(`/api/games/${gameId}/rescan`, 'POST')
 export const setLevelsRoot = (gameId: string, levelsRoot: string) =>
   sendJson<{ levelsRoot: string }>(`/api/games/${gameId}/levels-root`, 'PUT', { levelsRoot })
+
+// 玩法代码根目录确认（向导①："规则承载代码"位置——深度分析与适配层生成从这里全文收录）
+export const setCodeRoot = (gameId: string, codeRoot: string) =>
+  sendJson<{ codeRoot: string }>(`/api/games/${gameId}/code-root`, 'PUT', { codeRoot })
 
 // 深度分析（向导②：平台内调设置页模型，产出四问/机制/清单初稿；耗时 30~120s）
 export const analyzeProject = (gameId: string) =>

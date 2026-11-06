@@ -12,6 +12,7 @@ import {
   rescanProject,
   runGate1,
   runGate3,
+  setCodeRoot,
   setGameStatus,
   setGate2Driver,
   setGate2NotApplicable,
@@ -49,9 +50,11 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
 
   const profile = detail.projectProfile
 
-  // ①登记：关卡根目录（扫描候选或手填）+ 门2适用性
+  // ①登记：关卡根目录（扫描候选或手填）+ 玩法代码根目录 + 门2适用性
   const [chosenRoot, setChosenRoot] = useState('')
   const [manualRoot, setManualRoot] = useState('')
+  const [chosenCodeRoot, setChosenCodeRoot] = useState('')
+  const [manualCodeRoot, setManualCodeRoot] = useState('')
   const [gate2Choice, setGate2Choice] = useState<'unknown' | 'applicable' | 'not'>('unknown')
   const [driverCommand, setDriverCommand] = useState('')
   const [driverArgs, setDriverArgs] = useState('')
@@ -95,7 +98,8 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   // ①表单初值：detail 变化（导入/重扫后）时从画像回填
   useEffect(() => {
     setChosenRoot(detail.levelsRoot || profile?.levelDirCandidates?.[0]?.directory || '')
-  }, [detail.gameId, detail.levelsRoot, profile])
+    setChosenCodeRoot(detail.codeRoot || profile?.codeDirCandidates?.[0]?.directory || '')
+  }, [detail.gameId, detail.levelsRoot, detail.codeRoot, profile])
 
   // ④清单初始化：已持久化的用持久化值；否则按 深度分析初稿 > 画像派生 > 纯模板 优先级生成
   useEffect(() => {
@@ -118,6 +122,21 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       setInitialized(true)
     }
   }, [tasks, profile, detail.projectProfile, detail.projectAnalysis, initialized])
+
+  // ②报告文本框回填：优先已存档报告（刷新/重进不丢），否则分析初稿自动填入（路径 A 初稿语义）
+  useEffect(() => {
+    if (report) return
+    const step2 = tasks.find((t) => t.step === 2)
+    if (step2?.detail && step2.detail !== '未提供报告') {
+      setReport(step2.detail)
+      return
+    }
+    if (detail.projectAnalysis && profile) {
+      setReport(formatAnalysis(detail.projectAnalysis))
+    }
+    // report 刻意不入依赖：只在为空时回填一次，避免每次击键重跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, detail.projectAnalysis, profile])
 
   const markStep = async (step: number, status: string, detailText?: string) => {
     setError('')
@@ -161,6 +180,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   }
 
   // 深度分析初稿 → ④清单（与持久化联动）
+  const [checklistApplied, setChecklistApplied] = useState('')
   const applyChecklistDraft = () => {
     if (!effectiveAnalysis) return
     const next = seedChecklistFromAnalysis(profile, effectiveAnalysis)
@@ -168,6 +188,12 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     setChecked([])
     void persistChecklist('todo', next)
     setMessage('清单初稿已写入④（可在④继续增删）')
+    // 内联反馈：顶部消息在视口外（按钮在②区、消息在页首）；④未解锁时说明数据已存档不会丢
+    setChecklistApplied(
+      `✓ 已写入 ${next.length} 条到④审核清单（已存档）——${
+        verifyUnlocked ? '可在④继续增删勾选' : '④当前锁定（完成③适配层验收后解锁），届时清单已就绪'
+      }`,
+    )
   }
 
   const formatAnalysis = (a: ProjectAnalysis) => [
@@ -179,6 +205,8 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     ...a.mechanics.map((m) => `  - ${m}`),
     '风险点：',
     ...a.risks.map((r) => `  - ${r}`),
+    ...(a.hygieneGrade ? ['', `代码卫生度分级：${a.hygieneGrade}`] : []),
+    ...(a.workEstimate ? [`工作量预估：${a.workEstimate}`] : []),
     '',
     `总结：${a.summary}`,
   ].join('\n')
@@ -195,6 +223,26 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     try {
       await setLevelsRoot(game.gameId, root.trim())
       setMessage(`关卡根目录已保存：${root.trim()}`)
+      onStatusChanged()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // ①：玩法代码根目录回填（规则承载代码——分析与生成从这里全文收录；边界由用户画，工具不猜）
+  const submitCodeRoot = async () => {
+    const root = manualCodeRoot.trim() || chosenCodeRoot
+    if (!root.trim()) {
+      setError('请先从扫描候选中选择，或手动填写玩法代码根目录')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await setCodeRoot(game.gameId, root.trim())
+      setMessage(`玩法代码根目录已保存：${root.trim()}——重新深度分析即按此目录全文读取代码`)
       onStatusChanged()
     } catch (e) {
       setError((e as Error).message)
@@ -340,6 +388,19 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
         lines.push(`- 抽样文件 ${s.path}（${s.bytes}B）顶层键：{${s.topLevelKeys}}`)
       }
     }
+    if (detail.codeRoot || (profile?.codeDirCandidates?.length ?? 0) > 0) {
+      lines.push('', '# 玩法代码（规则承载代码——求解器语义的唯一权威来源，请全量阅读后再动手；插件/三方库一律忽略）')
+      if (detail.codeRoot) {
+        lines.push(`- 玩法代码根目录（用户已确认）：${detail.codeRoot}`)
+      } else {
+        lines.push('- 玩法代码根目录：用户尚未确认——结合代码结构向用户确认后全量阅读，不要凭抽样臆断规则')
+      }
+      for (const c of profile?.codeDirCandidates ?? []) {
+        if (c.directory !== detail.codeRoot) {
+          lines.push(`- 候选目录：${c.directory}/（${c.sourceFileCount} 个源码文件）`)
+        }
+      }
+    }
     if (effectiveAnalysis) {
       lines.push('', '# 深度分析结论（平台内模型初稿，已经用户审核环节；仍请核验）')
       for (const q of effectiveAnalysis.fourQuestions) {
@@ -364,7 +425,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       '- 参考实现：src/Adapters/SokobanToy（最小示例）、src/Adapters/SlidePig（实战参考，含踩坑记录）；门面参考 src/LevelForge.Platform/Facades 下两个内置门面源文件。',
     )
     return lines.join('\n')
-  }, [game.displayName, game.engineType, game.gameId, detail.projectRoot, profile, effectiveAnalysis])
+  }, [game.displayName, game.engineType, game.gameId, detail.projectRoot, detail.codeRoot, profile, effectiveAnalysis])
 
   const copyPrompt = async () => {
     try {
@@ -574,6 +635,44 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
           </div>
           {detail.levelsRoot && <div className="ob-note">当前已保存：<code>{detail.levelsRoot}</code></div>}
 
+          {/* 玩法代码根目录：规则承载代码的位置——用户画边界，分析/生成从这里全文收录（插件/三方库一律忽略） */}
+          {profile && (
+            <>
+              <div className="ob-note" style={{ marginTop: 12 }}>玩法代码根目录候选（来自项目扫描，已跳过插件/三方库，按子树源码文件数排序）——规则代码必须全量读取，边界由你确认：</div>
+              {(profile.codeDirCandidates?.length ?? 0) > 0 ? (
+                <div className="ob-options">
+                  {profile.codeDirCandidates!.map((c) => (
+                    <label key={c.directory} className="ob-option">
+                      <input
+                        type="radio"
+                        name="code-root"
+                        checked={chosenCodeRoot === c.directory}
+                        onChange={() => { setChosenCodeRoot(c.directory); setManualCodeRoot('') }}
+                      />
+                      <span className="ob-option-main"><code>{c.directory}/</code></span>
+                      <span className="ob-option-meta">{c.sourceFileCount} 个源码文件</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className="ob-note">扫描未发现源码聚簇目录——请手动填写玩法代码目录（如 Assets/Main/Game）：</div>
+              )}
+              <div className="ob-form-row">
+                {(chosenCodeRoot || manualCodeRoot || (profile?.codeDirCandidates?.length ?? 0) === 0) && (
+                  <input
+                    placeholder="玩法代码根目录（绝对路径或项目内相对路径）"
+                    value={manualCodeRoot || chosenCodeRoot}
+                    onChange={(e) => { setManualCodeRoot(e.target.value); setChosenCodeRoot('') }}
+                  />
+                )}
+                <button onClick={() => void submitCodeRoot()} disabled={busy || !(manualCodeRoot.trim() || chosenCodeRoot.trim())}>
+                  保存玩法代码目录
+                </button>
+              </div>
+              {detail.codeRoot && <div className="ob-note">当前已保存：<code>{detail.codeRoot}</code>{detail.codeRoot !== chosenCodeRoot && chosenCodeRoot ? '（已改动未保存）' : ''}</div>}
+            </>
+          )}
+
           <div className="ob-note" style={{ marginTop: 12 }}>门2（真机对拍）适用性——这是你的判断，工具不替你猜：</div>
           <div className="ob-options">
             <label className="ob-option">
@@ -629,14 +728,41 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
                 </tbody>
               </table>
               <div className="ob-note">
-                资格四问需要结合游戏代码做语义判断——点下方按钮让平台调用你配置的模型产出<b>初稿</b>，逐条审核后存档；
-                也可以把需求包交给外部 AI 评估后粘贴回来。
+                资格四问需要结合游戏代码做语义判断——<b>两条路径任选其一</b>，产物都存档到下方文本框：
+                <br />路径 A · 平台内分析——点下方按钮调模型产<b>初稿</b>（自动填入文本框），逐条审核后存档；
+                <br />路径 B · 外部 AI 完整评估——复制需求包交给外部 AI（ZCode/Cursor 等），它产出的报告<b>粘贴回下方文本框</b>存档；适配层 DLL 在③上传检测。
               </div>
-              {!effectiveAnalysis && (
-                <button className="primary" onClick={() => void doAnalyze()} disabled={analyzing}>
-                  {analyzing ? '深度分析中…（模型推理约需 30~120 秒，请勿关闭页面）' : '开始深度分析（调用设置页的模型）'}
-                </button>
-              )}
+              {(() => {
+                const label = analyzing
+                  ? '深度分析中…（模型推理约需 30~120 秒，请勿关闭页面）'
+                  : effectiveAnalysis
+                    ? '重新深度分析（覆盖旧结论——改过玩法代码目录/项目更新后使用）'
+                    : '开始深度分析（调用设置页的模型）'
+                return (
+                  <div>
+                    <button className="primary" onClick={() => void doAnalyze()} disabled={analyzing}>{label}</button>
+                    <span className="dialog-note" style={{ marginLeft: 8 }}>路径 A</span>
+                    {effectiveAnalysis && !analyzing && (
+                      <span className="dialog-note" style={{ marginLeft: 8 }}>
+                        上次分析：{new Date(effectiveAnalysis.analyzedAt).toLocaleString()}（{effectiveAnalysis.model}）——结论不会自动失效，重新分析会覆盖
+                      </span>
+                    )}
+                  </div>
+                )
+              })()}
+              {(() => {
+                const copyBtn = (
+                  <button onClick={() => void copyPrompt()}>
+                    路径 B · 复制需求包给外部 AI 完整评估
+                  </button>
+                )
+                return (
+                  <div style={{ marginTop: 6 }}>
+                    {copyBtn}
+                    {copied && <span className="ok-inline"> 已复制——粘贴给你的外部 AI；报告回填下方文本框存档</span>}
+                  </div>
+                )
+              })()}
               {effectiveAnalysis && (
                 <div className="gate1-cards">
                   {effectiveAnalysis.fourQuestions.map((q) => (
@@ -663,8 +789,19 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
                       <ul className="gate1-issues">{effectiveAnalysis.risks.map((r, i) => <li key={i}>{r}</li>)}</ul>
                     </div>
                   )}
+                  {(effectiveAnalysis.hygieneGrade || effectiveAnalysis.workEstimate) && (
+                    <div className="gate1-card">
+                      <div className="gate1-card-head"><span className="gate1-name">卫生度分级与工作量预估</span></div>
+                      <div className="gate1-notes">
+                        {effectiveAnalysis.hygieneGrade && <>卫生度：<b>{effectiveAnalysis.hygieneGrade.split('——')[0]}</b>{effectiveAnalysis.hygieneGrade.includes('——') ? `（${effectiveAnalysis.hygieneGrade.split('——').slice(1).join('——')}）` : ''}</>}
+                        {effectiveAnalysis.hygieneGrade && effectiveAnalysis.workEstimate && <br />}
+                        {effectiveAnalysis.workEstimate && <>工作量预估：{effectiveAnalysis.workEstimate}</>}
+                      </div>
+                    </div>
+                  )}
                   <div className="gate1-verdict">{effectiveAnalysis.summary}</div>
                   <button onClick={applyChecklistDraft}>把清单初稿写入④审核清单</button>
+                  {checklistApplied && <div className="ok-inline" style={{ marginTop: 6 }}>{checklistApplied}</div>}
                 </div>
               )}
             </>
