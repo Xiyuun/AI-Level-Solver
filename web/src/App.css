@@ -358,6 +358,21 @@ button:disabled { opacity: 0.5; cursor: default; }
 .cl-item.cl-state-confirmed { border-color: rgba(46, 160, 67, .45); }
 .cl-item.cl-state-na { border-color: rgba(183, 121, 31, .45); }
 
+/* 适配层声明语义查看器（③/④共用）：规则矩阵/格式说明书/玩法书/机制表/难度权重原文 */
+.semantics-viewer {
+  margin: 10px 0; border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; background: var(--surface);
+}
+.semantics-viewer summary { cursor: pointer; font-size: 13px; color: var(--text-2); }
+.semantics-note { margin: 6px 0; color: var(--text-3); font-size: 12px; line-height: 1.6; }
+.semantics-section { margin-top: 8px; }
+.semantics-title { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 2px; }
+.semantics-pre {
+  max-height: 280px; overflow: auto; margin: 0;
+  background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 6px;
+  padding: 8px; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap;
+}
+
 /* ③"开始生成适配层"引导卡 */
 .adapter-launch {
   border: 2px solid var(--accent, #4a6cf7); border-radius: 12px; padding: 16px 18px;

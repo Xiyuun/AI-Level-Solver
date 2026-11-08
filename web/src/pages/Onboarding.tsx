@@ -41,6 +41,7 @@ import {
   type ChecklistStateEntry,
 } from '../state/onboarding'
 import { ImportPanel } from '../components/ImportPanel'
+import { AdapterSemantics } from '../components/AdapterSemantics'
 import { gate1Checks } from '../state/gate1'
 import { buildRequirementPackage } from '../state/requirementPackage'
 
@@ -967,6 +968,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
                   </li>
                 ))}
               </ul>
+              <AdapterSemantics detail={detail} />
               <ImportPanel gameId={game.gameId} defaultDirectory={detail.levelsRoot} />
               <button className="primary" onClick={() => void submitGate1()}>验证适配层（运行门1 五项合规检查）</button>
             </>
@@ -1005,6 +1007,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
             <div className="ob-locked">🔒 本步验收的是适配层实现——完成③（适配层产出并通过门1）后解锁。</div>
           ) : (
           <>
+          <AdapterSemantics detail={detail} />
           <div className="ob-note">
             每条都是<b>可签字的断言</b>：确认前请对照「判据」核对“这条成立”。
             确实不适用的条目（例如 v1 未建模特殊猪）请选「不适用」并写理由——<b>不适用 ≠ 跳过</b>，理由会进审计记录。
