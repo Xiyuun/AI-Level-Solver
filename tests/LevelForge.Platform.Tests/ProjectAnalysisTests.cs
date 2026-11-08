@@ -116,6 +116,39 @@ public sealed class ProjectAnalysisTests
             Assert.DoesNotContain(profile.LevelDirCandidates, c => c.Directory == ".vscode");
             // 抽样必须来自真关卡：顶层键含 levelId（而不是 runtimeOptions）
             Assert.Contains(profile.SampleFiles, s => s.Parsed && s.TopLevelKeys!.Contains("levelId"));
+            // 第一名候选的小文件带原文预览（需求包直接引用，外部助手少读一次文件）
+            Assert.Contains(profile.SampleFiles, s => s.Preview is not null && s.Preview.Contains("levelId"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void 扫描器_多套关卡管线_观察里如实提示()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lf-multi-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            static void WriteLevels(string dir, Func<int, string> json)
+            {
+                Directory.CreateDirectory(dir);
+                for (var i = 1; i <= 5; i++)
+                {
+                    File.WriteAllText(Path.Combine(dir, $"{i:000000}.json"), json(i));
+                }
+            }
+            // 两套不同 schema 的关卡管线（模拟 piggyfarm 的主线 499 / 框架 110）
+            WriteLevels(Path.Combine(root, "Assets", "Main", "LevelEditor", "Luban~", "Datas", "Levels"),
+                i => $$"""{"levelId":{{i}},"mapWidth":12,"mapHeight":19,"pigs":[{"id":0}]}""");
+            WriteLevels(Path.Combine(root, "Assets", "Main", "FrameWorkExtras", "LevelData", "Luban~", "Datas", "Levels"),
+                i => $$"""{"levelId":{{i}},"chessCount":{{100 + i}},"chesses":[{"type":"normal"}]}""");
+
+            var profile = ProjectScanner.Scan(root, "unity");
+            Assert.True(profile.LevelDirCandidates.Count >= 2);
+            Assert.Contains(profile.Observations, o =>
+                o.Contains("多套关卡数据管线") && o.Contains("LevelEditor") && o.Contains("FrameWorkExtras"));
         }
         finally
         {

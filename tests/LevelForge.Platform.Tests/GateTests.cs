@@ -32,6 +32,78 @@ public sealed class GateTests
     }
 
     [Fact]
+    public void 门2驱动建议_Unity项目_探测harness版本与占位符()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lf-g2-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Assets", "Editor", "LevelForgeHarness"));
+            File.WriteAllText(Path.Combine(root, "Assets", "Editor", "LevelForgeHarness", "PairingHarness.cs"), "// harness");
+            Directory.CreateDirectory(Path.Combine(root, "ProjectSettings"));
+            File.WriteAllText(Path.Combine(root, "ProjectSettings", "ProjectVersion.txt"), "m_EditorVersion: 2022.3.62f1\n");
+
+            var suggestion = Gate2DriverSuggester.Suggest(root);
+            Assert.True(suggestion.Applicable);
+            Assert.Equal("Assets/Editor/LevelForgeHarness/PairingHarness.cs", suggestion.HarnessPath);
+            Assert.Equal("2022.3.62f1", suggestion.UnityVersion);
+            Assert.Contains("{levelFile}", suggestion.Args);
+            Assert.Contains("{tapeFile}", suggestion.Args);
+            Assert.Contains("{outputFile}", suggestion.Args);
+            Assert.Contains("LevelForgeHarness.PairingHarness.Run", suggestion.Args);
+            Assert.Contains(suggestion.Notes, n => n.Contains("已找到对拍 harness"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void 门2驱动建议_无harness_如实标不适用()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lf-g2n-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var suggestion = Gate2DriverSuggester.Suggest(root);
+            Assert.False(suggestion.Applicable);
+            Assert.Null(suggestion.HarnessPath);
+            Assert.Contains(suggestion.Notes, n => n.Contains("未找到"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task 门2驱动建议端点_导入项目无harness_返回不适用与待办()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lf-g2api-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "assets"));
+        File.WriteAllText(Path.Combine(root, "package.json"), """{"name":"demo","creator":{"version":"3.8.1"}}""");
+        try
+        {
+            using var factory = new PlatformFactory();
+            var client = factory.CreateClient();
+            var import = await client.PostAsync("/api/projects/import", new StringContent(
+                JsonSerializer.Serialize(new { directory = root }, TestJson.Options), Encoding.UTF8, "application/json"));
+            import.EnsureSuccessStatusCode();
+            var dto = JsonSerializer.Deserialize<Api.ProjectImportResultDto>(
+                await import.Content.ReadAsStringAsync(), TestJson.Options)!;
+
+            var suggestion = JsonSerializer.Deserialize<Gate2DriverSuggestion>(
+                await client.GetStringAsync($"/api/games/{dto.GameId}/gate2-driver/suggest"), TestJson.Options)!;
+            Assert.False(suggestion.Applicable);
+            Assert.Contains(suggestion.Notes, n => n.Contains("未找到"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task 门1_玩具全绿且落验证记录()
     {
         using var factory = new PlatformFactory();

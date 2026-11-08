@@ -67,6 +67,22 @@ public static class GateEndpoints
             }
         });
 
+        // 门2驱动建议（向导①）：从项目结构探测 harness/Unity 版本/编辑器，预填命令与参数占位符
+        // 只探测不启动；找不到 harness 时 applicable=false 并给出待办，避免"手填到一半才发现没有 harness"
+        app.MapGet("/api/games/{gameId}/gate2-driver/suggest", (string gameId, GameStore games) =>
+        {
+            var game = games.FindGame(gameId);
+            if (game is null)
+            {
+                return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+            }
+            if (string.IsNullOrWhiteSpace(game.ProjectRoot))
+            {
+                return Results.BadRequest(new { message = "该玩法不是导入的项目（无项目根目录），无法探测门2驱动" });
+            }
+            return Results.Ok(Gate2DriverSuggester.Suggest(game.ProjectRoot));
+        });
+
         // 验证记录查询（可按门过滤）：?gate=gate1|gate2|gate3
         app.MapGet("/api/games/{gameId}/verification-records",
             (string gameId, string? gate, VerificationRecordStore records) =>

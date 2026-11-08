@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using LevelForge.Platform.AdapterGen;
 using LevelForge.Platform.Llm;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -151,6 +152,20 @@ public sealed class AdapterGenTests
         {
             try { Directory.Delete(projectDir, true); } catch (IOException) { }
         }
+    }
+
+    [Fact]
+    public void 平台内生成提示词_包含契约与内核装配要求()
+    {
+        // 路径 A 的提示词必须与路径 B 对齐：契约/制带/门1/五维语义缺一不可
+        var prompt = AdapterGenPrompt.BuildSystemPrompt("piggyfarm", @"D:\bin", @"D:\ws", "piggyfarm.csproj");
+        Assert.Contains("ReplayEngine.RecordTape", prompt);
+        Assert.Contains("AdapterHosting", prompt);
+        Assert.Contains("RunGate1Checks", prompt);
+        Assert.Contains("ComplianceReport", prompt);
+        Assert.Contains("ResourceLimit", prompt);
+        Assert.Contains("HostingCheckInput", prompt);
+        Assert.Contains("不要尝试读取", prompt);   // 纠正"可读取参考源码"的误导（模型无法读平台目录）
     }
 
     [Fact]

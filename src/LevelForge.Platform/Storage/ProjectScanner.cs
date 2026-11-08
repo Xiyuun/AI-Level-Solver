@@ -44,7 +44,8 @@ public sealed record SampleFile(
     long Bytes,
     bool Parsed,
     string? TopLevelKeys,       // 顶层键逗号串（解析成功才有）
-    string? ParseError);
+    string? ParseError,
+    string? Preview = null);    // 原文预览（仅候选第一名的小文件，≤2000 字符；给需求包直接引用）
 
 // 项目扫描器（三轮 N12 完整版）：真实读取项目目录，产出结构化画像。
 // 用途：①登记预填关卡根目录 ②资格评估的机器事实区 ③需求包内嵌样例原文 ④按项目生成审核清单初稿
@@ -325,9 +326,11 @@ public static class ProjectScanner
     }
 
     // 抽样：每个候选目录取最小的 2 个 JSON 读出顶层键（小文件更可能是关卡而不是配置）
+    // 预览只给第一名候选的小文件（≤64KB、≤2000 字符）：需求包要能直接贴原文给外部助手
     private static List<SampleFile> SampleFiles(string root, List<LevelDirCandidate> candidates, List<(string Rel, long Bytes)> jsons)
     {
         var samples = new List<SampleFile>();
+        var topDir = candidates.Count > 0 ? candidates[0].Directory : null;
         foreach (var candidate in candidates.Take(3))
         {
             var inDir = jsons
@@ -341,7 +344,8 @@ public static class ProjectScanner
                 {
                     using var doc = JsonDocument.Parse(File.ReadAllText(full));
                     var keys = string.Join(",", doc.RootElement.EnumerateObject().Select(p => p.Name).Take(12));
-                    samples.Add(new SampleFile(j.Rel, j.Bytes, Parsed: true, keys, null));
+                    var preview = candidate.Directory == topDir ? ReadPreview(full, j.Bytes) : null;
+                    samples.Add(new SampleFile(j.Rel, j.Bytes, true, keys, null, preview));
                 }
                 catch (Exception ex) when (ex is JsonException or IOException)
                 {
@@ -369,6 +373,21 @@ public static class ProjectScanner
             }
         }
         return samples;
+    }
+
+    // 原文预览：只读小文件（≤64KB），截断到 2000 字符；读取失败返回 null（照实降级，不影响扫描结论）
+    private static string? ReadPreview(string fullPath, long bytes)
+    {
+        if (bytes > 64 * 1024) return null;
+        try
+        {
+            var text = File.ReadAllText(fullPath);
+            return text.Length <= 2000 ? text : text[..2000] + "…（截断）";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     // 机器观察：只陈述事实，不下语义结论（诚实语义）
@@ -410,6 +429,14 @@ public static class ProjectScanner
                 + (topSchema.EntityTypes.Length > 0 ? $"；判别值：{topSchema.EntityTypes}" : "")
                 + (topSchema.NumericRanges.Length > 0 ? $"；数值范围：{topSchema.NumericRanges}" : "")
                 + (topSchema.Anomalies.Count > 0 ? $"；异常 {topSchema.Anomalies.Count} 条：{string.Join("；", topSchema.Anomalies.Take(3))}" : ""));
+        }
+        // 多套关卡管线：两个候选的全量共键不同 → 事实层面提示"用哪套需要人确认"（不替用户选）
+        if (schemas.Count >= 2 && schemas[0].ParsedCount > 0 && schemas[1].ParsedCount > 0
+            && !string.Equals(schemas[0].CommonKeys, schemas[1].CommonKeys, StringComparison.Ordinal))
+        {
+            obs.Add($"发现多套关卡数据管线：{schemas[0].Directory}/（{schemas[0].FileCount} 个，共键 {{{Shorten(schemas[0].CommonKeys, 120)}}}）"
+                + $" 与 {schemas[1].Directory}/（{schemas[1].FileCount} 个，共键 {{{Shorten(schemas[1].CommonKeys, 120)}}}）"
+                + "——导入前确认用哪一套，不要把两套混在一起导入");
         }
         return obs;
     }
@@ -512,6 +539,12 @@ public static class ProjectScanner
     }
 
     private static string FormatNum(double d) => d == Math.Truncate(d) ? ((long)d).ToString() : d.ToString("0.##");
+
+    // 文本截断：观察文案里嵌 schema 键串时防止一行过长
+    private static string Shorten(string text, int max)
+    {
+        return text.Length <= max ? text : text[..max] + "…";
+    }
 
     #endregion
 

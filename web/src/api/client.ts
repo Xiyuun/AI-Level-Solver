@@ -52,7 +52,7 @@ export interface ProjectProfile {
   projectRoot: string
   engine: string
   levelDirCandidates: { directory: string; jsonCount: number; namingHint: string }[]
-  sampleFiles: { path: string; bytes: number; parsed: boolean; topLevelKeys: string | null; parseError: string | null }[]
+  sampleFiles: { path: string; bytes: number; parsed: boolean; topLevelKeys: string | null; parseError: string | null; preview?: string | null }[]
   observations: string[]
   codeDirCandidates: { directory: string; sourceFileCount: number }[] | null // 玩法代码目录候选（子树源码文件数排序，已跳过插件）
 }
@@ -499,6 +499,21 @@ export const setGate2NotApplicable = (gameId: string) =>
   sendJson<{ message: string; applicable: boolean }>(`/api/games/${gameId}/gate2-driver`, 'POST', {
     applicable: false,
   })
+
+// 门2驱动建议：从项目结构探测 harness/Unity 版本/编辑器，预填命令与参数占位符
+export interface Gate2DriverSuggestion {
+  applicable: boolean
+  harnessPath: string | null
+  unityVersion: string | null
+  unityPath: string | null
+  command: string
+  args: string[]
+  timeoutSeconds: number
+  notes: string[]
+}
+
+export const suggestGate2Driver = (gameId: string) =>
+  getJson<Gate2DriverSuggestion>(`/api/games/${gameId}/gate2-driver/suggest`)
 
 // LLM 测试连接（可带待验证配置，未保存先测）
 export const testLlmConnection = (body: { baseUrl?: string; apiKey?: string; model?: string }) =>

@@ -284,4 +284,11 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
 - **需求包重写**（`web/src/state/requirementPackage.ts` 纯函数 + 4 个 vitest）：补齐 工具仓库绝对路径与必读材料、**契约与内核职责**（IGameFacade/PlatformSolve/ReplayEngine.RecordTape/AdapterHosting/DifficultyModel；搜索可自带但五维语义必须遵守）、关卡数据核验（工具配置警告）、导入/门1/测试/交付/诚实边界口径；Onboarding 改为调用该函数（原先内联在页面里，无法单测）。
 - **system.toolRepoRoot 自动写入**：平台启动从运行目录向上找 `LevelForge.slnx`（源码运行），发布版为空时需求包给出"未配置"可操作警告——解决需求包只写仓库名、外部助手拼不出 ProjectReference 路径的问题。
 - **levels_root 不再被插件检测覆盖**（GameSeeder upsert：用户设置优先、空值才回填）；**插件升级上传**旧 DLL 被装载锁定时由 500 空响应改为 409 可操作提示（提示重启平台）。
-- 测试：后端 **289**（+扫描器深层关卡目录、+upsert 保留 levels_root）+ 前端 **79**（+需求包 4 项）全绿；真实平台重扫与 settings 验证通过。
+
+第二批（同日，四项按收益排序全部落地）：
+
+- **路径 A 提示词与路径 B 对齐**：提示词独立为 `AdapterGenPrompt.BuildSystemPrompt`（纯函数可单测），补 求解装配骨架（`ReplayEngine.RecordTape`/`FeatureExtractor`+`DifficultyModel`/`RunConfig`）、门1 装配骨架（`AdapterHosting`+`HostingCheckInput`+状态键样本）、五维结论语义与"预算耗尽≠无解"、输出前自检；去掉误导性的"可读取参考源码"（模型读不到平台目录）。
+- **需求包附抽样关卡原文**：扫描器给第一名候选的小文件（≤64KB）生成 ≤2000 字符预览（`SampleFile.Preview`），需求包直接贴 JSON 原文并注明"规则仍以玩法代码为准"。
+- **门2 驱动向导化**：`Gate2DriverSuggester` 按项目结构探测 `PairingHarness.cs`、`ProjectVersion.txt`、Unity Hub 安装路径，生成含 `{levelFile}/{tapeFile}/{outputFile}` 的 batchmode 命令；端点 `GET /api/games/{id}/gate2-driver/suggest`；向导①新增"探测 Unity 驱动并预填"按钮 + 事实/待办列表（找不到 Unity.exe 时用 `<UnityEditorPath>` 占位符并提示替换）。
+- **多套关卡管线提示**：扫描观察在 top2 候选共键不同时输出"发现多套关卡数据管线：A（499，共键…）与 B（110，共键…）——导入前确认用哪一套"。
+- 测试：后端 **289→294**（+路径A提示词、+多管线观察、+驱动建议 2 单测与端点），前端 **79→80**（+样例原文）；piggyfarm 实测：多管线提示出现、Gate2 建议 `applicable=true`（harness + Unity 2022.3.62f3c1；Unity 路径未自动找到→占位符）、扫描预览可用。

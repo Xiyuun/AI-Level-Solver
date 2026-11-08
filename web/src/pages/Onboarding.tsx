@@ -19,6 +19,7 @@ import {
   setGate2NotApplicable,
   setLevelsRoot,
   startAdapterGen,
+  suggestGate2Driver,
   updateOnboardingStep,
   uploadPlugin,
   type AdapterDetectResult,
@@ -75,6 +76,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   const [driverCommand, setDriverCommand] = useState('')
   const [driverArgs, setDriverArgs] = useState('')
   const [driverTimeout, setDriverTimeout] = useState(180)
+  const [driverNotes, setDriverNotes] = useState<string[]>([])
 
   // ②报告存档 + 深度分析
   const [report, setReport] = useState('')
@@ -260,6 +262,27 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       await setCodeRoot(game.gameId, root.trim())
       setMessage(`玩法代码根目录已保存：${root.trim()}——重新深度分析即按此目录全文读取代码`)
       onStatusChanged()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // ①：探测门2驱动（Unity 项目：找 harness/版本/编辑器，预填命令与占位符参数）
+  const detectDriver = async () => {
+    setBusy(true)
+    setError('')
+    setDriverNotes([])
+    try {
+      const suggestion = await suggestGate2Driver(game.gameId)
+      setDriverCommand(suggestion.command)
+      setDriverArgs(suggestion.args.join(' '))
+      setDriverTimeout(suggestion.timeoutSeconds)
+      setDriverNotes(suggestion.notes)
+      setMessage(suggestion.command.includes('<UnityEditorPath>')
+        ? '已预填驱动：请把命令里的 <UnityEditorPath> 替换为本机 Unity.exe 路径后再登记'
+        : '已预填驱动：核对参数占位符后登记')
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -657,14 +680,30 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
             </label>
           </div>
           {gate2Choice === 'applicable' && (
-            <div className="ob-form-row">
-              <input placeholder="门2驱动命令（如 Unity.exe 或 cmd）" value={driverCommand} onChange={(e) => setDriverCommand(e.target.value)} />
-              <input placeholder="参数（空格分隔，占位符 {levelFile} {tapeFile} {outputFile}）" value={driverArgs} onChange={(e) => setDriverArgs(e.target.value)} />
-              <input type="number" min={5} value={driverTimeout} onChange={(e) => setDriverTimeout(Number(e.target.value) || 180)} style={{ width: 90 }} title="超时秒数" />
-              <button onClick={() => void submitDriver()} disabled={!driverCommand.trim() || !driverArgs.trim() || busy}>
-                登记驱动并完成本步
-              </button>
-            </div>
+            <>
+              <div className="ob-form-row">
+                <button
+                  onClick={() => void detectDriver()}
+                  disabled={busy}
+                  title="从项目结构探测 harness / Unity 版本 / 编辑器路径，自动预填命令与占位符参数"
+                >
+                  探测 Unity 驱动并预填
+                </button>
+              </div>
+              {driverNotes.length > 0 && (
+                <ul className="ob-note" style={{ margin: '4px 0 8px 16px' }}>
+                  {driverNotes.map((note, i) => <li key={i}>{note}</li>)}
+                </ul>
+              )}
+              <div className="ob-form-row">
+                <input placeholder="门2驱动命令（如 Unity.exe 或 cmd）" value={driverCommand} onChange={(e) => setDriverCommand(e.target.value)} />
+                <input placeholder="参数（空格分隔，占位符 {levelFile} {tapeFile} {outputFile}）" value={driverArgs} onChange={(e) => setDriverArgs(e.target.value)} />
+                <input type="number" min={5} value={driverTimeout} onChange={(e) => setDriverTimeout(Number(e.target.value) || 180)} style={{ width: 90 }} title="超时秒数" />
+                <button onClick={() => void submitDriver()} disabled={!driverCommand.trim() || !driverArgs.trim() || busy}>
+                  登记驱动并完成本步
+                </button>
+              </div>
+            </>
           )}
           {gate2Choice === 'not' && (
             <button onClick={() => void submitNotApplicable()} disabled={busy}>登记为不适用并完成本步</button>

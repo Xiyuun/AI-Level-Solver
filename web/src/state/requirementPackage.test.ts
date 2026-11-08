@@ -16,6 +16,7 @@ const profile: ProjectProfile = {
     parsed: true,
     topLevelKeys: 'levelId,difficulty,mapWidth,pigs',
     parseError: null,
+    preview: '{"levelId":1,"mapWidth":12,"pigs":[{"id":0}]}',
   }],
   observations: ['引擎识别：unity；项目内共扫描到 537 个 JSON 文件'],
   codeDirCandidates: [{ directory: 'Assets/Main/Game', sourceFileCount: 338 }],
@@ -65,6 +66,13 @@ describe('buildRequirementPackage', () => {
     expect(text).toContain('不要复制')
     expect(text).toContain('piggyfarm')
     expect(text).toContain('门2 未跑前不得宣称')
+  })
+
+  it('附上抽样关卡原文（≤2000 字符）供外部助手少读一次文件', () => {
+    const text = buildRequirementPackage(input())
+    expect(text).toContain('抽样关卡原文')
+    expect(text).toContain('"levelId":1')
+    expect(text).toContain('规则语义仍以玩法代码为准')
   })
 
   it('工具仓库路径缺失时给出可操作警告', () => {

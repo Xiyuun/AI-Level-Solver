@@ -62,7 +62,7 @@ public sealed class AdapterGenRunner(
 
         var messages = new List<ChatMessage>
         {
-            new("system", BuildSystemPrompt(job.GameId, binDir, workspace, csprojName)),
+            new("system", AdapterGenPrompt.BuildSystemPrompt(job.GameId, binDir, workspace, csprojName)),
             new("user", facts + "\n\n" + codeSamples + "\n\n" + levelSample(root, profile) + "\n\n请产出第一版适配层源文件。"),
         };
 
@@ -194,56 +194,6 @@ public sealed class AdapterGenRunner(
         {
             return (false, [], ex.Message);
         }
-    }
-
-    private static string BuildSystemPrompt(string gameId, string binDir, string workspace, string csprojName)
-    {
-        return $$"""
-            你是资深适配层工程师，为 LevelForge 平台编写一个新玩法的适配层插件（C#/net10.0）。
-            输出格式（严格遵守）：不要 markdown 代码块、不要解释文字。每个源文件用以下标记包裹，标记之外不得有任何内容：
-            // ==== FILE: 文件名.cs ====
-            （完整 C# 文件原文）
-            // ==== END FILE ====
-            文件名只能是简单文件名（不含路径）。可以输出多个文件块（如门面 + 解析器 + 搜索器分文件）。
-
-            # 插件项目（平台已生成，你只产 .cs 文件）
-            - 项目文件：{{workspace}}\{{csprojName}}（AssemblyName={{gameId}}）
-            - 已引用（HintPath 指向平台运行目录 {{binDir}}）：LevelForge.Kernel.dll、LevelForge.FacadeContracts.dll——不要在代码中重新定义这些程序集里的类型
-            - 编译命令即 dotnet build 该 csproj
-
-            # 必须实现的门面契约（LevelForge.Platform.Facades 命名空间）
-            public interface IGameFacade {
-              GameRegistration Registration { get; }
-              IReadOnlyList<string> BuiltinLevels { get; }
-              string? TryGetLevelId(string levelJson);
-              IReadOnlyList<string> FormatErrors(string levelJson);
-              PlatformSolve Solve(SolveCommand command);
-              ComplianceReport RunGate1Checks();
-              PlayState Play(string levelJson, IReadOnlyList<JsonNode> moves);
-            }
-            - GameRegistration 构造参数（按序）：GameId, DisplayName, Status, AdapterVersion, AdapterHash, KernelVersion, ContractVersion, LevelsRootDir, Gate2Applicable, VisualMappingJson, MechanicsJson, GameBrief, FormatSpec, RuleMatrix, DifficultyWeightsJson
-              * GameId 必须一字不差为「{{gameId}}」；Status 用 "trial"；AdapterHash 用 AdapterFingerprint.Of(typeof(你的门面).Assembly)
-              * KernelVersion/ContractVersion 用 TapeConstants.KernelVersion / TapeConstants.ContractVersion（LevelForge.Kernel.Replay）
-            - SolveCommand 构造参数：(string LevelJson, byte[] LevelFileBytes, string LevelRef, TimeSpan? TimeBudget=null, long? NodeBudget=null, long? MemoryBudgetBytes=null, bool FullEnumeration=false)
-            - PlatformSolve 构造参数：(SolveResult Result, SolutionTape? Tape, DifficultyAssessment Difficulty, string? RunConfigHash)
-              * 无解/未实现时 Tape=null、Difficulty 用 new DifficultyAssessment(0, 0, "{{gameId}}-v1", [], [])
-            - SolveResult 构造参数：(SolveStatus Status, Optimality Optimality, bool GraphComplete, TerminationReason TerminationReason, MetricsScope MetricsScope, IReadOnlyList<MoveRecord> Solution, SearchMetrics? Metrics=null, string? ErrorMessage=null)
-            - ComplianceReport 由五个 ComplianceResult 组成（DependencyScan/StateKeyDiscrimination/Purity/Determinism/KernelSelfTest），用 ComplianceResult.Pass(kind, notes) 构造
-
-            # using 命名空间（严格照抄；缺一个就会 CS0246，编译器不会替你猜）
-            - LevelForge.Platform.Facades：IGameFacade、GameRegistration、SolveCommand、PlatformSolve、PlayState、PlayMove、AdapterFingerprint
-            - LevelForge.Kernel.Contracts：SolveResult、SearchMetrics、MoveRecord、SolveStatus、Optimality、TerminationReason、MetricsScope、SolutionTape、SceneSnapshot、TapeConstants
-            - LevelForge.Kernel.Hosting：ComplianceReport、ComplianceResult、ComplianceCheckKind
-            - LevelForge.Kernel.Analysis：DifficultyAssessment
-
-            # 诚实语义（硬约束）
-            - 非法关卡数据必须返回错误/抛异常，禁止静默修复；求解未证明不冒充结论
-            - 求解策略：优先实现基于关卡数据的确定性搜索（如广度优先/状态去重）；确定做不到时返回 ResourceLimit 并如实说明，不要伪造 Solved
-
-            # 求解与玩法逻辑来源
-            - 玩法规则语义来自用户项目代码抽样与关卡数据（见用户消息）；无法确定的规则用保守默认并在注释中标注 // TODO-CONFIRM（需与游戏本体核对）
-            {{binDir}} 目录下有参考实现源码项目：src/Adapters/LevelForge.Adapters.SokobanToy（最小示例）与 src/Adapters/LevelForge.Adapters.SlidePig（实战，含状态/搜索组织）——如需参考结构可读取其源码文件
-            """;
     }
 
     private static string CsprojTemplate(string gameId, string binDir)

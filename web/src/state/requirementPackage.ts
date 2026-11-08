@@ -77,6 +77,14 @@ export function buildRequirementPackage(input: RequirementPackageInput): string 
     for (const s of profile.sampleFiles.filter((x) => x.parsed)) {
       lines.push(`- 抽样文件 ${s.path}（${s.bytes}B）顶层键：{${s.topLevelKeys}}`)
     }
+    const previewSample = profile.sampleFiles.find((s) => s.parsed && s.preview)
+    if (previewSample?.preview) {
+      lines.push(`- 抽样关卡原文（${previewSample.path}，最多 2000 字符）：`)
+      lines.push('```json')
+      lines.push(previewSample.preview)
+      lines.push('```')
+      lines.push('- 原文只用于确认字段形态；规则语义仍以玩法代码为准，不要只凭样例臆断全部规则。')
+    }
     lines.push('')
     lines.push('# 关卡数据核验（写解析器前必须先做）')
     lines.push('- 候选目录只是候选：先打开抽样文件确认它是**关卡**（含关卡字段，如 levelId/mapWidth/pigs/grid/tiles 等）；')
