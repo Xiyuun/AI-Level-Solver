@@ -8,8 +8,10 @@ import {
   deleteProject,
   detectAdapter,
   getAdapterGenJob,
+  getBaselineStatus,
   getOnboarding,
   getSettings,
+  confirmManualBaselines,
   rescanProject,
   runGate1,
   runGate3,
@@ -23,6 +25,7 @@ import {
   updateOnboardingStep,
   uploadPlugin,
   type AdapterDetectResult,
+  type BaselineStatusDto,
   type GameDetail,
   type GameSummary,
   type OnboardingTask,
@@ -111,6 +114,13 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   const [gate3, setGate3] = useState<Awaited<ReturnType<typeof runGate3>> | null>(null)
   const [gate3Running, setGate3Running] = useState(false)
   const [gate3Elapsed, setGate3Elapsed] = useState(0)
+
+  // ⑥基准管理：门3 的对照物；门2不适用的玩法走人工签认（确认人+说明写进执行确认）
+  const [baselineStatus, setBaselineStatus] = useState<BaselineStatusDto | null>(null)
+  const [baselineName, setBaselineName] = useState('')
+  const [baselineNote, setBaselineNote] = useState('')
+  const [baselineBusy, setBaselineBusy] = useState(false)
+  const [baselineMsg, setBaselineMsg] = useState('')
 
   const refresh = useCallback(async () => {
     try {
@@ -436,11 +446,40 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       const result = await runGate3(game.gameId)
       setGate3(result)
       setMessage(`门3完成：共 ${result.total} 关（红 ${result.red} / 黄 ${result.yellow} / 新 ${result.newLevels} / 一致 ${result.matched}）`)
+      void refreshBaselines()
     } catch (e) {
       setError((e as Error).message)
     } finally {
       window.clearInterval(timer)
       setGate3Running(false)
+    }
+  }
+
+  // 人工签认建立基准：仅门2不适用/人工降级时使用；确认人与说明落执行确认+基准审计
+  const confirmBaselinesManually = async () => {
+    const name = baselineName.trim()
+    const note = baselineNote.trim()
+    if (!name) {
+      setError('请填写签认人（会写进审计记录）')
+      return
+    }
+    if (note.length < 10) {
+      setError('签认说明至少 10 个字：写清依据（如逐关在游戏本体执行通过）')
+      return
+    }
+    setBaselineBusy(true)
+    setError('')
+    setBaselineMsg('')
+    try {
+      const result = await confirmManualBaselines(game.gameId, name, note)
+      const tail = result.errors.length > 0 ? `；${result.errors.slice(0, 3).join('；')}` : ''
+      setBaselineMsg(`已建立 ${result.created} 条基准（跳过 ${result.skipped}，失败 ${result.failed}）${tail}`)
+      setMessage(`人工签认完成：新建基准 ${result.created} 条，请重跑门3 使待确认新关归零`)
+      await refreshBaselines()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBaselineBusy(false)
     }
   }
 
@@ -588,6 +627,19 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   const step2Unlocked = step1Done
   const step3Unlocked = step2Unlocked && (statusOf(2) === 'done' || statusOf(2) === 'blocked')
   const verifyUnlocked = step3Unlocked && game.adapterReady   // ④⑤⑥：适配层产出后才有验收对象
+
+  // ⑥基准状态：进入本步时加载（适配层未接入时接口会 400，静默为空）
+  const refreshBaselines = async () => {
+    try {
+      setBaselineStatus(await getBaselineStatus(game.gameId))
+    } catch {
+      setBaselineStatus(null)
+    }
+  }
+  useEffect(() => {
+    if (verifyUnlocked) void refreshBaselines()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.gameId, verifyUnlocked])
 
   return (
     <div className="onboarding">
@@ -1169,6 +1221,43 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
             <div className="ob-note">
               门3 正在逐关求解全部 {game.levelCount} 关（首次运行没有基准，结果会进入「待确认」集合）；
               耗时可能几分钟，完成后在下方显示四区结果，请不要关闭页面。
+            </div>
+          )}
+          {baselineStatus && (
+            <div className="baseline-panel">
+              <div className="baseline-head">
+                门3 对照基准：<b>{baselineStatus.confirmed}/{baselineStatus.total}</b> 已建立
+                {baselineStatus.missing > 0
+                  ? `（${baselineStatus.missing} 关待确认）`
+                  : '（已齐全，重跑门3 应无“待确认”）'}
+              </div>
+              {baselineStatus.missing > 0 && (
+                <>
+                  <div className="ob-note">
+                    门2 不适用/未跑时可走人工降级：<b>先逐关在游戏本体执行通过</b>，再填签认人与说明，
+                    平台据此写执行确认并落基准（确认人与说明进审计）。<b>未真机执行过请勿签认</b>——
+                    这不是门3 自证，签认内容会被记录。
+                  </div>
+                  <div className="ob-form-row">
+                    <input
+                      placeholder="签认人（必填，会写进执行确认与基准审计）"
+                      value={baselineName}
+                      onChange={(e) => setBaselineName(e.target.value)}
+                    />
+                  </div>
+                  <textarea
+                    placeholder='签认说明（≥10 字）：如"33 关逐关在游戏本体执行通过，对拍记录见 xxx"'
+                    value={baselineNote}
+                    onChange={(e) => setBaselineNote(e.target.value)}
+                  />
+                  <div className="ob-form-row">
+                    <button onClick={() => void confirmBaselinesManually()} disabled={baselineBusy}>
+                      {baselineBusy ? '写入基准中…' : `人工签认建立基准（${baselineStatus.missing} 关）`}
+                    </button>
+                  </div>
+                </>
+              )}
+              {baselineMsg && <div className="ok-inline">{baselineMsg}</div>}
             </div>
           )}
           {gate3Zones?.blocked && (

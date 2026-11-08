@@ -156,6 +156,14 @@ public sealed record BaselineDto(
     int SolutionLength, long StatesExplored, string TrajectoryHash,
     string? ExecutionConfirmationRef, string? ApprovedBy, string? ApprovedAt, string CreatedAt);
 
+// 人工签认建立基准（门2不适用的降级路径）：levelIds 为空 = 全部已导入关卡；
+// 只在"已在游戏本体逐关执行通过"后使用，确认人与说明会写进执行确认与基准审计
+public sealed record ManualBaselineRequestDto(string? ConfirmedBy, string? Note, List<string>? LevelIds);
+
+// 人工签认结果：created=新建基准，skipped=已有基准或已签认，failed=无运行/求解失败等
+public sealed record ManualBaselineResponseDto(
+    int Created, int Skipped, int Failed, string AdapterHash, string KernelVer, List<string> Errors);
+
 // ---- 三道门 ----
 
 // 门1运行结论（report 为五项检查明细）

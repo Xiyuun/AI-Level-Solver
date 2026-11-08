@@ -75,6 +75,38 @@ public sealed class SolveRunStore
         cmd.ExecuteNonQuery();
     }
 
+    // 取某关在当前适配层指纹下的最新运行（基准签认复用门3 已产生的运行，避免重复求解）
+    public SolveRunRow? FindLatestForLevel(string gameId, string levelId, string adapterHash)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, game_id, level_ref, level_hash, adapter_hash, kernel_ver, contract_ver, run_config_hash,
+              status, optimality, graph_complete, termination_reason, metrics_scope, solution_length,
+              states_explored, unique_states, frontier_peak, elapsed_ms, avg_branching, error_message,
+              tape_id, created_at
+            FROM solve_runs
+            WHERE game_id = $g AND level_ref = $l AND adapter_hash = $ah
+            ORDER BY id DESC LIMIT 1
+            """;
+        cmd.Parameters.AddWithValue("$g", gameId);
+        cmd.Parameters.AddWithValue("$l", levelId);
+        cmd.Parameters.AddWithValue("$ah", adapterHash);
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return null;
+        return new SolveRunRow(
+            reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetString(5), reader.GetString(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.GetString(8), reader.GetString(9), reader.GetInt64(10) != 0,
+            reader.GetString(11), reader.GetString(12), reader.GetInt32(13),
+            reader.GetInt64(14), reader.GetInt64(15), reader.GetInt64(16), reader.GetInt64(17),
+            reader.GetDouble(18),
+            reader.IsDBNull(19) ? null : reader.GetString(19),
+            reader.IsDBNull(20) ? null : reader.GetInt64(20),
+            reader.GetString(21));
+    }
+
     // 取单条运行；不存在返回 null
     public SolveRunRow? Get(long runId)
     {

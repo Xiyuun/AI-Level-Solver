@@ -464,6 +464,29 @@ export const approveBaseline = (id: number, approvedBy: string) =>
 export const listBaselines = (gameId: string) =>
   getJson<BaselineRowDto[]>(`/api/games/${gameId}/baselines`)
 
+// 基准状态/人工签认（⑥）：门2不适用的降级路径，签认人+说明写进执行确认与基准审计
+export interface BaselineStatusRowDto {
+  levelId: string
+  hasBaseline: boolean
+  baselineId: number | null
+  runId: number | null
+  runStatus: string | null
+  solutionLength: number | null
+}
+export interface BaselineStatusDto {
+  adapterHash: string
+  kernelVer: string
+  total: number
+  confirmed: number
+  missing: number
+  rows: BaselineStatusRowDto[]
+}
+export const getBaselineStatus = (gameId: string) =>
+  getJson<BaselineStatusDto>(`/api/games/${gameId}/baselines/status`)
+export const confirmManualBaselines = (gameId: string, confirmedBy: string, note: string) =>
+  sendJson<{ created: number; skipped: number; failed: number; errors: string[] }>(
+    `/api/games/${gameId}/baselines/manual`, 'POST', { confirmedBy, note })
+
 // 设置与短语
 export const getSettings = () => getJson<Record<string, unknown>>('/api/settings')
 export const saveSettings = (entries: Record<string, unknown>) =>

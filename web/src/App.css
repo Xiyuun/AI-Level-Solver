@@ -554,3 +554,11 @@ button:disabled { opacity: 0.5; cursor: default; }
 /* 所有按钮的即时按压反馈：即使异步操作尚未返回，也能看出"点到了" */
 button:not(:disabled):active { transform: translateY(1px); filter: brightness(.94); }
 button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ⑥基准管理：门3 对照物（人工签认降级路径） */
+.baseline-panel {
+  margin: 10px 0; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface);
+}
+.baseline-head { font-size: 13px; margin-bottom: 6px; }
+.baseline-panel textarea { width: 100%; min-height: 56px; margin: 6px 0; }
