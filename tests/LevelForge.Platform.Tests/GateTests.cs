@@ -118,6 +118,8 @@ public sealed class GateTests
         Assert.True(result.Report["purity"]!["passed"]!.GetValue<bool>());
         Assert.True(result.Report["determinism"]!["passed"]!.GetValue<bool>());
         Assert.True(result.Report["kernelSelfTest"]!["passed"]!.GetValue<bool>());
+        // 派生属性 allPassed 不进入 API 载荷：前端按检查项字典遍历，布尔字段会被误当成检查项打崩页面
+        Assert.Null(result.Report!["allPassed"]);
 
         // 记录落库：指纹字段齐备（适配指纹/内核版本/规则矩阵哈希）
         var records = JsonSerializer.Deserialize<List<Api.VerificationRecordDto>>(

@@ -304,3 +304,12 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
 - **实测三段**：修复前 4×99s 全空正文且无原因 → 只修思考开关：4 轮均产 7 文件、2→20 条编译错误 → 加契约速查：**第 2 轮编译通过 + 门1 全绿 + adapterReady 翻转，总耗时 57s**（第 1 轮仅 2 条编译错误回喂）。
 - 测试：后端 **294→298**（+LlmClient 思考开关/兼容回退、+空正文错误非空、+契约速查内容），前端 80 不变。
 - 注意：本次验证在 piggyfarm 行上注册了一个 trial 适配层（`data/plugins/piggyfarm/piggyfarm.dll`）；若改用路径 B：先停平台删该插件目录再启动（插件装载时 DLL 被锁，直接上传会 409）。
+
+### 10.12 门1 按钮整页白屏修复（2026-11-08）
+
+用户点「验证适配层（运行门1）」后整页立即变白。
+
+- **根因**：`ComplianceReport.AllPassed` 是派生属性，被 System.Text.Json 一并序列化进 gate1 报告；前端把报告当"检查项字典"遍历，`allPassed` 是布尔值，访问 `result.issues.length` 抛 TypeError；React 无错误边界 → 卸载整棵根节点 → 白屏。只有点击后才触发（`gate1` state 由 null 变为报告）。
+- **修复**：①`AllPassed` 加 `[JsonIgnore]`（派生结论不进 API 载荷，Gate1RunResponseDto 与插件检测的 gate1Report 同时生效）；②前端新增 `gate1Checks()` 纯函数做类型过滤（只收 `{passed, issues[], notes[]}` 形状），run 与 detect 两处渲染统一走它，额外字段不再打崩页面；③`main.tsx` 包一层 `ErrorBoundary`，未来任何渲染异常显示可读错误 + 刷新按钮，不再白屏。
+- 测试：后端 298（门1 断言 `report.allPassed == null`）、前端 **83**（gate1Checks 3 项：过滤派生布尔/缺字段兜底/空报告）。浏览器实测：点击按钮后五项检查卡 + "门1 全绿（零豁免）" 正常渲染，console 无错误。
+- 教训：API 不序列化派生字段；遍历外部字典先做形状校验；根节点必须有错误边界。

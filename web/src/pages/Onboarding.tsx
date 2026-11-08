@@ -37,6 +37,7 @@ import {
   type ChecklistItem,
 } from '../state/onboarding'
 import { ImportPanel } from '../components/ImportPanel'
+import { gate1Checks } from '../state/gate1'
 import { buildRequirementPackage } from '../state/requirementPackage'
 
 export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: {
@@ -906,7 +907,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
                 )}
                 {detectResult?.gate1Report && (
                   <div className="gate1-cards">
-                    {Object.entries(detectResult.gate1Report).map(([name, result]) => (
+                    {gate1Checks(detectResult.gate1Report).map(([name, result]) => (
                       <div key={name} className={`gate1-card ${result.passed ? 'ok' : 'bad'}`}>
                         <div className="gate1-card-head">
                           <span className="gate1-mark">{result.passed ? '✓' : '✗'}</span>
@@ -938,7 +939,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
           )}
           {gate1 && (
             <div className="gate1-cards">
-              {Object.entries(gate1.report ?? {}).map(([name, result]) => (
+              {gate1Checks(gate1.report).map(([name, result]) => (
                 <div key={name} className={`gate1-card ${result.passed ? 'ok' : 'bad'}`}>
                   <div className="gate1-card-head">
                     <span className="gate1-mark">{result.passed ? '✓' : '✗'}</span>

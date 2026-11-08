@@ -39,6 +39,8 @@ public sealed record ComplianceReport(
     ComplianceResult KernelSelfTest)           // 检查5 内核自测
 {
     // 全绿才通过：门1的通过标准是零豁免（验证门 §3）
+    // [JsonIgnore]：派生结论不进 API 载荷——前端按"检查项字典"遍历时，多出的布尔字段会被当成检查项导致渲染崩溃
+    [System.Text.Json.Serialization.JsonIgnore]
     public bool AllPassed =>
         DependencyScan.Passed && StateKeyDiscrimination.Passed &&
         Purity.Passed && Determinism.Passed && KernelSelfTest.Passed;
