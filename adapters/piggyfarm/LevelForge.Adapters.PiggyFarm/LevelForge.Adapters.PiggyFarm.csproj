@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- piggyfarm 适配层插件（工具仓库之外的独立程序集）
+       契约程序集只引用、不复制（Private=false）：平台加载器与插件共享同一份类型定义，
+       复制 LevelForge.Kernel.dll / LevelForge.FacadeContracts.dll 会导致类型分裂。 -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>LevelForge.Adapters.PiggyFarm</AssemblyName>
+    <RootNamespace>LevelForge.Adapters.PiggyFarm</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\LevelForge.FacadeContracts\LevelForge.FacadeContracts.csproj" Private="false" />
+    <ProjectReference Include="..\..\..\src\LevelForge.Kernel\LevelForge.Kernel.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>
