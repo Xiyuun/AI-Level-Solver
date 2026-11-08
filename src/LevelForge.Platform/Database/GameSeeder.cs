@@ -45,7 +45,11 @@ public static class GameSeeder
             ON CONFLICT(id) DO UPDATE SET
               display_name = excluded.display_name, adapter_ver = excluded.adapter_ver,
               adapter_hash = excluded.adapter_hash, kernel_ver = excluded.kernel_ver,
-              contract_ver = excluded.contract_ver, levels_root = excluded.levels_root,
+              contract_ver = excluded.contract_ver,
+              -- levels_root 是用户可编辑列：向导①里设置过的值优先保留，插件检测/重启对齐元数据时不得覆盖
+              -- （插件注册表里给的是默认值；只有库里为空时才回填）
+              levels_root = CASE WHEN games.levels_root IS NULL OR games.levels_root = ''
+                                 THEN excluded.levels_root ELSE games.levels_root END,
               gate2_applicable = excluded.gate2_applicable, visual_mapping_json = excluded.visual_mapping_json,
               mechanics_json = excluded.mechanics_json, game_brief = excluded.game_brief,
               format_spec = excluded.format_spec, rule_matrix = excluded.rule_matrix,

@@ -9,6 +9,7 @@ import {
   detectAdapter,
   getAdapterGenJob,
   getOnboarding,
+  getSettings,
   rescanProject,
   runGate1,
   runGate3,
@@ -35,6 +36,7 @@ import {
   type ChecklistItem,
 } from '../state/onboarding'
 import { ImportPanel } from '../components/ImportPanel'
+import { buildRequirementPackage } from '../state/requirementPackage'
 
 export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: {
   game: GameSummary
@@ -49,6 +51,20 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   const [copied, setCopied] = useState(false)
 
   const profile = detail.projectProfile
+
+  // 工具仓库路径：平台启动时写入 settings.system.toolRepoRoot；需求包用它拼 ProjectReference 绝对路径
+  const [toolRepoRoot, setToolRepoRoot] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    getSettings()
+      .then((s) => {
+        if (!alive) return
+        const value = s['system.toolRepoRoot']
+        setToolRepoRoot(typeof value === 'string' && value.trim().length > 0 ? value : null)
+      })
+      .catch(() => undefined)   // 读不到就保持空：需求包里会给出"未配置"的明确提示，不阻断向导
+    return () => { alive = false }
+  }, [])
 
   // ①登记：关卡根目录（扫描候选或手填）+ 玩法代码根目录 + 门2适用性
   const [chosenRoot, setChosenRoot] = useState('')
@@ -367,65 +383,21 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     { name: '规则矩阵 rule-matrix', ok: detail.ruleMatrix.length > 0 },
   ]
 
-  // 需求包：含扫描事实，外部 AI 不用从零探索
-  const adapterPrompt = useMemo(() => {
-    const lines = [
-      `请为 LevelForge 平台制作「${game.displayName}」的求解器适配层。`,
-      '',
-      '# 项目信息',
-      `- 引擎类型：${game.engineType ?? '未知'}`,
-      `- 项目根目录：${detail.projectRoot ?? '（见下方说明，请向用户确认）'}`,
-      `- 注册标识（gameId，必须一字不差）：${game.gameId}`,
-      '- 工具仓库：LevelForge_glm',
-    ]
-    if (profile) {
-      lines.push('', '# 项目扫描事实（平台已扫描，可直接采信；如与实际不符请重新扫描）')
-      for (const o of profile.observations) lines.push(`- ${o}`)
-      if (profile.levelDirCandidates.length > 0) {
-        lines.push('- 关卡目录候选（按相似度排序）：' + profile.levelDirCandidates.map((c) => `${c.directory}/(${c.jsonCount}个,${c.namingHint})`).join('、'))
-      }
-      for (const s of profile.sampleFiles.filter((x) => x.parsed)) {
-        lines.push(`- 抽样文件 ${s.path}（${s.bytes}B）顶层键：{${s.topLevelKeys}}`)
-      }
-    }
-    if (detail.codeRoot || (profile?.codeDirCandidates?.length ?? 0) > 0) {
-      lines.push('', '# 玩法代码（规则承载代码——求解器语义的唯一权威来源，请全量阅读后再动手；插件/三方库一律忽略）')
-      if (detail.codeRoot) {
-        lines.push(`- 玩法代码根目录（用户已确认）：${detail.codeRoot}`)
-      } else {
-        lines.push('- 玩法代码根目录：用户尚未确认——结合代码结构向用户确认后全量阅读，不要凭抽样臆断规则')
-      }
-      for (const c of profile?.codeDirCandidates ?? []) {
-        if (c.directory !== detail.codeRoot) {
-          lines.push(`- 候选目录：${c.directory}/（${c.sourceFileCount} 个源码文件）`)
-        }
-      }
-    }
-    if (effectiveAnalysis) {
-      lines.push('', '# 深度分析结论（平台内模型初稿，已经用户审核环节；仍请核验）')
-      for (const q of effectiveAnalysis.fourQuestions) {
-        lines.push(`- 四问｜${q.question}：${q.answer}（证据：${q.evidence}）`)
-      }
-      for (const m of effectiveAnalysis.mechanics) lines.push(`- 机制｜${m}`)
-      for (const r of effectiveAnalysis.risks) lines.push(`- 风险｜${r}`)
-      if (effectiveAnalysis.summary) lines.push(`- 总结｜${effectiveAnalysis.summary}`)
-    }
-    lines.push(
-      '',
-      '# 任务步骤',
-      '1. 阅读 LevelForge_glm/skills/onboarding-skill/（onboarding.md=接入总纲；deliverables.md=产物清单；contract.md=接入契约；reference/=实战参考）。',
-      '2. 结合上方扫描事实核验关卡数据形态，产出资格评估结论（四问 + 证据），交由用户粘贴回向导②存档。',
-      '3. 按 skill 产出一套适配层：关卡解析、状态/动作模型、求解适配，以及规则矩阵/格式说明书/机制表/视觉映射等接入产物。',
-      '4. 把门面与适配层编译为独立插件程序集：新建 net10.0 类库项目（放在工具仓库之外的任意目录），ProjectReference 引用仓库内 src/LevelForge.FacadeContracts/LevelForge.FacadeContracts.csproj 与 src/LevelForge.Kernel/LevelForge.Kernel.csproj；门面类实现 IGameFacade。',
-      `5. Registration.GameId 必须一字不差为「${game.gameId}」（与已导入玩法行绑定）；编译产出 DLL（连同该插件的非契约依赖 DLL）交付给用户上传到平台向导③——平台检测时自动装载注册并跑门1。不要修改平台源码，不要重新构建平台。`,
-      '',
-      '# 约束',
-      '- 严格遵循接入契约与诚实语义：非法数据必须抛异常，禁止静默修复；未知照实标注，不冒充结论。',
-      '- 插件内不要复制 LevelForge.Kernel.dll / LevelForge.FacadeContracts.dll（平台加载器共享平台副本，复制会导致类型分裂）。',
-      '- 参考实现：src/Adapters/SokobanToy（最小示例）、src/Adapters/SlidePig（实战参考，含踩坑记录）；门面参考 src/LevelForge.Platform/Facades 下两个内置门面源文件。',
-    )
-    return lines.join('\n')
-  }, [game.displayName, game.engineType, game.gameId, detail.projectRoot, detail.codeRoot, profile, effectiveAnalysis])
+  // 需求包：纯函数生成（state/requirementPackage.ts）——含工具仓库、契约与内核职责、项目事实、
+  // 关卡数据核验提示、导入/门1/测试/交付口径；单测覆盖，避免又退回"只给事实不给规格"
+  const adapterPrompt = useMemo(
+    () => buildRequirementPackage({
+      gameId: game.gameId,
+      displayName: game.displayName,
+      engineType: game.engineType,
+      projectRoot: detail.projectRoot,
+      codeRoot: detail.codeRoot,
+      profile,
+      analysis: effectiveAnalysis,
+      toolRepoRoot,
+    }),
+    [game.gameId, game.displayName, game.engineType, detail.projectRoot, detail.codeRoot, profile, effectiveAnalysis, toolRepoRoot],
+  )
 
   const copyPrompt = async () => {
     try {

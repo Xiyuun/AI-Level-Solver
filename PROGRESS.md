@@ -276,3 +276,12 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
 - **清单写入按钮内联反馈**：「把清单初稿写入④审核清单」点击后成功消息渲染在页首（视口外）且④处于锁定态，观感"没反应"——按钮旁新增内联反馈（写入条数 + ④锁定说明）。
 - 测试：后端 281→286（新增 GameplayCodeTests 5 项：候选提名跳过插件/索引+全文两层/自动提名标注/预算封顶诚实标注/code-root 端点落库；修 DatabaseAndSeedTests v5 断言、AdapterGenTests 夹具）+ 前端 75 全绿；浏览器端到端实测全链路（候选渲染→保存 code_root→重新分析→四问卡片带玩法证据→卫生度/工作量卡→双路径引导→设置页预算字段）。
 
+### 10.10 工具内容完善：扫描识别 + 需求包规格补全（2026-11-08）
+
+用户纠正"要完善工具的内容，不是替外部 AI 做适配层"——以 piggyfarm 路径 B 实测暴露的缺口整改（未改平台架构）：
+
+- **ProjectScanner 三处修正**：①JSON 扫描深度 5→8——真实关卡在 `Assets/Main/LevelEditor/Luban~/Datas/Levels`（相对深度 6），原来整目录漏掉，只剩 `Tools/Luban` 工具配置；②候选排序从"纯数量"改为"抽样关字段相似度 → 编号命名 → 数量"（`runtimeOptions`/`compilerOptions` 一类工具配置不再压过真关卡）；③schema 口径诚实化：FileCount=目录 JSON 总数、ParsedCount=抽样 100 内解析数，观察文案标注"抽样"。实测 piggyfarm 重扫：Top=LevelEditor…/Levels（499），次=FrameWorkExtras…/Levels（110），Tools/Luban 降至第 3。
+- **需求包重写**（`web/src/state/requirementPackage.ts` 纯函数 + 4 个 vitest）：补齐 工具仓库绝对路径与必读材料、**契约与内核职责**（IGameFacade/PlatformSolve/ReplayEngine.RecordTape/AdapterHosting/DifficultyModel；搜索可自带但五维语义必须遵守）、关卡数据核验（工具配置警告）、导入/门1/测试/交付/诚实边界口径；Onboarding 改为调用该函数（原先内联在页面里，无法单测）。
+- **system.toolRepoRoot 自动写入**：平台启动从运行目录向上找 `LevelForge.slnx`（源码运行），发布版为空时需求包给出"未配置"可操作警告——解决需求包只写仓库名、外部助手拼不出 ProjectReference 路径的问题。
+- **levels_root 不再被插件检测覆盖**（GameSeeder upsert：用户设置优先、空值才回填）；**插件升级上传**旧 DLL 被装载锁定时由 500 空响应改为 409 可操作提示（提示重启平台）。
+- 测试：后端 **289**（+扫描器深层关卡目录、+upsert 保留 levels_root）+ 前端 **79**（+需求包 4 项）全绿；真实平台重扫与 settings 验证通过。

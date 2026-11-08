@@ -134,8 +134,20 @@ public static class ProjectEndpoints
             var dir = Path.Combine(db.DataDir, "plugins", gameId);
             Directory.CreateDirectory(dir);
             var target = Path.Combine(dir, Path.GetFileName(file.FileName));
-            await using var stream = File.Create(target);
-            await file.OpenReadStream().CopyToAsync(stream);
+            try
+            {
+                await using var stream = File.Create(target);
+                await file.OpenReadStream().CopyToAsync(stream);
+            }
+            catch (IOException ex)
+            {
+                // 旧插件已被装载时 Windows 会锁住 DLL 文件：给出可操作提示，不抛 500 空响应
+                return Results.Conflict(new
+                {
+                    message = $"写入 {Path.GetFileName(target)} 失败：该 DLL 可能正被已加载的旧插件占用（{ex.Message}）。"
+                        + "请先停止平台再覆盖文件，或上传后重启平台完成升级"
+                });
+            }
             return Results.Ok(new { saved = Path.GetFileName(target) });
         });
 

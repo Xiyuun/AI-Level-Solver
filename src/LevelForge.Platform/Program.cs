@@ -70,6 +70,18 @@ database.Initialize();
 app.Services.GetRequiredService<PluginLoader>().LoadAll();   // 三轮 D7：plugins/{gameId}/ 全量装载，重启后插件依然生效
 GameSeeder.Seed(database, app.Services.GetRequiredService<GameRegistry>());
 
+// 工具仓库路径：向导③"路径 B"的外部编程助手需要它拼 ProjectReference（契约/内核工程）。
+// 源码运行（dotnet run / 开发构建）时从运行目录向上找 LevelForge.slnx；发布版没有源码仓库则为空。
+var toolRepoRoot = ResolveToolRepoRoot();
+if (toolRepoRoot is not null)
+{
+    var settingsStore = app.Services.GetRequiredService<SettingsStore>();
+    if (string.IsNullOrWhiteSpace(settingsStore.Get<string>("system.toolRepoRoot", "")))
+    {
+        settingsStore.Set("system.toolRepoRoot", toolRepoRoot);
+    }
+}
+
 // 前端构建产物托管：开发模式找仓库 web/dist，自包含发布找 exe 同级 wwwroot
 var devDist = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "..", "web", "dist"));
 var pubWwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
@@ -112,6 +124,24 @@ else
 #endregion
 
 app.Run();
+
+// 工具仓库根：从运行目录/当前目录向上找 LevelForge.slnx（最多 8 层）；发布版找不到 → null
+static string? ResolveToolRepoRoot()
+{
+    foreach (var start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+    {
+        var dir = new DirectoryInfo(start);
+        for (var i = 0; i < 8 && dir is not null; i++)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "LevelForge.slnx")))
+            {
+                return dir.FullName;
+            }
+            dir = dir.Parent;
+        }
+    }
+    return null;
+}
 
 // 供 WebApplicationFactory 测试挂载（顶级语句生成的 Program 需 partial 声明才可被外部程序集引用）
 public partial class Program { }

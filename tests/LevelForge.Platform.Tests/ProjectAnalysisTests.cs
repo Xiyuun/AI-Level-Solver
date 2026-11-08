@@ -73,6 +73,49 @@ public sealed class ProjectAnalysisTests
             Assert.Contains("level:1~5", schema.NumericRanges);
             Assert.Contains("chessCount:101~105", schema.NumericRanges);
             Assert.Empty(schema.Anomalies);
+            // 口径：文件总数与抽样解析数分开说，不能把"抽样"说成"全量"
+            Assert.Contains(profile.Observations, o => o.Contains("共 5 个 JSON") && o.Contains("抽样 5 个"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void 扫描器_深层编辑源关卡目录_压过工具配置JSON()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lf-unity-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Unity 项目真实形态：编辑源关卡在 LevelEditor/Luban~/Datas/Levels（相对深度 6）
+            var levels = Path.Combine(root, "Assets", "Main", "LevelEditor", "Luban~", "Datas", "Levels");
+            Directory.CreateDirectory(levels);
+            for (var i = 1; i <= 6; i++)
+            {
+                File.WriteAllText(Path.Combine(levels, $"{i:000000}.json"),
+                    $$"""{"levelId":{{i}},"difficulty":1,"levelName":"n","mapWidth":12,"mapHeight":19,"pigCount":1,"pigs":[{"id":0,"facing":"Left","pigType":"Normal","specialInfo":"","occupiedCells":[{"x":1,"y":1},{"x":2,"y":1}]}]}""");
+            }
+
+            // 干扰项：工具配置 JSON 数量更多，但字段不是关卡（runtimeOptions/compilerOptions）
+            var tools = Path.Combine(root, "Tools", "Luban");
+            Directory.CreateDirectory(tools);
+            for (var i = 0; i < 10; i++)
+            {
+                File.WriteAllText(Path.Combine(tools, $"tool{i}.json"), """{"runtimeOptions":{"tfm":"net8.0"}}""");
+            }
+            var vscode = Path.Combine(root, ".vscode");
+            Directory.CreateDirectory(vscode);
+            File.WriteAllText(Path.Combine(vscode, "a.json"), """{"version":"0.2.0","configurations":[]}""");
+
+            var profile = ProjectScanner.Scan(root, "unity");
+            var top = profile.LevelDirCandidates[0];
+            Assert.Equal("Assets/Main/LevelEditor/Luban~/Datas/Levels", top.Directory);
+            Assert.Equal(6, top.JsonCount);
+            Assert.Equal("numbered", top.NamingHint);
+            Assert.DoesNotContain(profile.LevelDirCandidates, c => c.Directory == ".vscode");
+            // 抽样必须来自真关卡：顶层键含 levelId（而不是 runtimeOptions）
+            Assert.Contains(profile.SampleFiles, s => s.Parsed && s.TopLevelKeys!.Contains("levelId"));
         }
         finally
         {

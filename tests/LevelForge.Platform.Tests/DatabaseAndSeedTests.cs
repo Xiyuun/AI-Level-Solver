@@ -48,6 +48,23 @@ public sealed class DatabaseAndSeedTests : IDisposable
     }
 
     [Fact]
+    public void 注册upsert_不覆盖用户设置的关卡根目录()
+    {
+        var db = new AppDatabase(_dir);
+        db.Initialize();
+        GameSeeder.Seed(db, GameRegistry.Instance);
+        var store = new GameStore(db);
+        Assert.True(store.UpdateLevelsRoot("sokoban-toy", "levels/user-chosen"));
+
+        // 模拟插件检测/重启时对权威列的 upsert：levels_root 是用户可编辑列，必须保留
+        var registration = GameRegistry.Instance.Facades
+            .Single(f => f.Registration.GameId == "sokoban-toy").Registration;
+        GameSeeder.UpsertGame(db, registration);
+
+        Assert.Equal("levels/user-chosen", store.FindGame("sokoban-toy")!.LevelsRoot);
+    }
+
+    [Fact]
     public void 种子_注册玩具玩法与内置关()
     {
         var db = new AppDatabase(_dir);

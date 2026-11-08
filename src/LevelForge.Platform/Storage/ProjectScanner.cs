@@ -50,16 +50,16 @@ public sealed record SampleFile(
 // 用途：①登记预填关卡根目录 ②资格评估的机器事实区 ③需求包内嵌样例原文 ④按项目生成审核清单初稿
 public static class ProjectScanner
 {
-    private const int MaxDepth = 5;            // 相对深度上限（防止扫到引擎 SDK/库目录深处；JSON 扫描用）
+    private const int MaxDepth = 8;            // JSON 扫描相对深度上限（LevelEditor/Luban~/Datas/Levels 这类编辑源在 6 层，5 层会整目录漏掉）
     private const int MaxSourceDepth = 12;     // 源码收集深度上限（玩法代码树嵌套深，如 Assets/Main/Game/Modules/X/Model/…；插件等噪声目录已在 SkipDirs 排除）
     private const int MaxJsonFiles = 2000;     // JSON/源码文件扫描上限（大项目防爆炸）
-    private static readonly string[] SkipDirs = ["node_modules", "library", "temp", "packages", "settings", "build", "dist", ".git", "bin", "obj", "extensions",
-        "plugins", "plugin", "thirdparty", "third_party"];   // 插件/三方库：玩法代码候选与代码抽样一律忽略
+    private static readonly string[] SkipDirs = ["node_modules", "library", "temp", "packages", "settings", "build", "dist", ".git", ".vscode", ".vs", ".idea", "bin", "obj", "extensions",
+        "plugins", "plugin", "thirdparty", "third_party"];   // 插件/三方库/IDE 配置：玩法代码候选与代码抽样一律忽略
 
     public static ProjectProfile Scan(string projectRoot, string engine)
     {
         var jsons = CollectJsonFiles(projectRoot);
-        var candidates = RankLevelDirs(jsons);
+        var candidates = RankLevelDirs(projectRoot, jsons);
         var samples = SampleFiles(projectRoot, candidates, jsons);
         var schemas = SchemaSummaries(projectRoot, candidates);
         var codeCandidates = RankCodeDirs(projectRoot, engine);
@@ -137,22 +137,66 @@ public static class ProjectScanner
         return result;
     }
 
-    // 关卡目录候选：按目录聚簇 JSON，数量 ≥3 的目录按"编号命名相似度"打分排序
-    private static List<LevelDirCandidate> RankLevelDirs(List<(string Rel, long Bytes)> jsons)
+    // 关卡目录候选：先按目录聚簇 JSON（数量 ≥3），再按"抽样文件是否含关卡字段"优先排序
+    // 动机：Unity 工程里 Tools/Luban 等目录也有一堆 JSON（runtimeconfig/tsconfig），只按数量排序
+    // 会把工具配置排在真关卡前面（piggyfarm 实测：25 个工具配置压过 499 个关卡）
+    private static List<LevelDirCandidate> RankLevelDirs(string root, List<(string Rel, long Bytes)> jsons)
     {
-        var byDir = jsons
+        var directories = jsons
             .GroupBy(j => Path.GetDirectoryName(j.Rel)?.Replace('\\', '/') ?? "")
-            .Select(g => new { Dir = g.Key, Files = g.Select(x => Path.GetFileNameWithoutExtension(x.Rel)).ToList() })
-            .Where(g => g.Files.Count >= 3)
-            .OrderByDescending(g => g.Files.Count)
+            .Where(g => g.Count() >= 3)
+            .Select(g => new
+            {
+                Dir = g.Key,
+                Files = g.Select(x => Path.GetFileNameWithoutExtension(x.Rel)).ToList(),
+                Samples = g.OrderBy(x => x.Bytes).Take(3).ToList()
+            })
+            .Select(g => new
+            {
+                g.Dir,
+                Count = g.Files.Count,
+                LevelLike = ScoreLevelLike(root, g.Samples),
+                Numbered = g.Files.Count(n => long.TryParse(n, out _)) / (double)g.Files.Count,
+                Naming = ClassifyNaming(g.Files)
+            })
+            .OrderByDescending(g => g.LevelLike)
+            .ThenByDescending(g => g.Numbered)
+            .ThenByDescending(g => g.Count)
+            .ThenBy(g => g.Dir, StringComparer.Ordinal)   // 同分按路径字典序（确定性）
             .Take(5)
             .ToList();
 
-        return byDir.Select(g => new LevelDirCandidate(
-            g.Dir,
-            g.Files.Count,
-            ClassifyNaming(g.Files))).ToList();
+        return directories.Select(g => new LevelDirCandidate(g.Dir, g.Count, g.Naming)).ToList();
     }
+
+    // 关卡相似度：抽样最多 3 个小文件，统计"含关卡字段"的比例（0~1）
+    // 只用于候选排序，不冒充语义判断——真正选哪个仍由用户在向导①确认
+    private static double ScoreLevelLike(string root, List<(string Rel, long Bytes)> samples)
+    {
+        var checkedCount = 0;
+        var levelLike = 0;
+        foreach (var sample in samples)
+        {
+            var full = Path.Combine(root, sample.Rel.Replace('/', Path.DirectorySeparatorChar));
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(full));
+                if (doc.RootElement.ValueKind != JsonValueKind.Object) continue;
+                checkedCount++;
+                var keys = doc.RootElement.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (LevelJsonKeys.Any(keys.Contains)) levelLike++;
+            }
+            catch (Exception ex) when (ex is JsonException or IOException)
+            {
+                // 读不了/坏 JSON 不计入分母：不让单个坏文件把一个真关卡目录压到 0
+            }
+        }
+        return checkedCount == 0 ? 0 : (double)levelLike / checkedCount;
+    }
+
+    // 关卡 JSON 的常见顶层字段（宁严勿宽：通用 id/name/type 不算证据，避免把配置 JSON 误判成关卡）
+    private static readonly string[] LevelJsonKeys =
+        ["levelId", "level", "levelNumber", "mapWidth", "mapHeight", "pigs", "grid", "tiles", "cells", "chesses", "board"];
 
     // 命名聚簇：纯数字（1,2,3…）/ 统一前缀+数字（level_1, level_2…）/ 其他
     private static string ClassifyNaming(List<string> names)
@@ -355,11 +399,12 @@ public static class ProjectScanner
         {
             obs.Add($"有 {failed.Count} 个抽样文件解析失败（{string.Join("；", failed.Select(f => f.Path))}）");
         }
-        // 全量 schema 摘要（N12 完整版：顶层候选的全库聚合事实）
+        // 全量 schema 摘要（N12 完整版：顶层候选的聚合事实；超过 100 个文件时只抽样解析前 100 个，如实标注）
         var topSchema = schemas.FirstOrDefault(s => s.ParsedCount > 0);
         if (topSchema is not null)
         {
-            obs.Add($"[{topSchema.Directory}/] 全量 {topSchema.FileCount} 关中 {topSchema.ParsedCount} 个可解析；"
+            var sampled = Math.Min(topSchema.FileCount, 100);
+            obs.Add($"[{topSchema.Directory}/] 共 {topSchema.FileCount} 个 JSON（抽样 {sampled} 个）中 {topSchema.ParsedCount} 个可解析；"
                 + $"共键：{{{topSchema.CommonKeys}}}"
                 + (topSchema.NestedKeys.Length > 0 ? $"；嵌套：{topSchema.NestedKeys}" : "")
                 + (topSchema.EntityTypes.Length > 0 ? $"；判别值：{topSchema.EntityTypes}" : "")
@@ -371,22 +416,24 @@ public static class ProjectScanner
 
     #region 全量 schema 聚合（N12 完整版 A：深度确定性扫描）
 
-    // 对前两个候选目录做全量聚合（每目录 ≤100 个文件）：共键 / 数组元素嵌套键 / 判别字段取值 / 数值范围 / 异常
+    // 对前两个候选目录做全量聚合（每目录最多解析 100 个文件，超出部分只计入总数、不解析）
+    // 事实口径：FileCount=目录内 JSON 总数，ParsedCount=抽样解析数——不能把"抽样 100"说成"全量 100"
     private static List<SchemaSummary> SchemaSummaries(string root, List<LevelDirCandidate> candidates)
     {
         var result = new List<SchemaSummary>();
         foreach (var candidate in candidates.Take(2))
         {
             var dirFull = Path.Combine(root, candidate.Directory.Replace('/', Path.DirectorySeparatorChar));
-            var files = new List<string>();
+            List<string> allFiles;
             try
             {
-                files = Directory.EnumerateFiles(dirFull, "*.json").Take(100).ToList();
+                allFiles = Directory.EnumerateFiles(dirFull, "*.json").ToList();
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 continue;
             }
+            var files = allFiles.Take(100).ToList();
             var keyCount = new Dictionary<string, int>(StringComparer.Ordinal);
             var nested = new SortedDictionary<string, HashSet<string>>(StringComparer.Ordinal);
             var discriminator = new SortedDictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -458,7 +505,7 @@ public static class ProjectScanner
                 .Where(kv => kv.Value.Seen >= 3 && kv.Value.Max > kv.Value.Min)
                 .OrderBy(kv => kv.Key).Take(10)
                 .Select(kv => $"{kv.Key}:{FormatNum(kv.Value.Min)}~{FormatNum(kv.Value.Max)}"));
-            result.Add(new SchemaSummary(candidate.Directory, files.Count, parsedCount,
+            result.Add(new SchemaSummary(candidate.Directory, allFiles.Count, parsedCount,
                 commonKeys, nestedKeys, entityTypes, numericRanges, anomalies.Take(10).ToList()));
         }
         return result;
