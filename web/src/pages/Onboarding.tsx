@@ -448,8 +448,11 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     setError('')
     try {
       await setGameStatus(game.gameId, status)
-      await markStep(6, 'done', `状态变更为 ${status}`)
-      setMessage(status === 'production' ? '已转正上线（production）' : '已上线试用档（trial）')
+      // 试用档只是提前上线：⑥"门3+基准+上线注册"仍未完成，不能把第6步标 done
+      if (status === 'production') {
+        await markStep(6, 'done', `状态变更为 ${status}`)
+      }
+      setMessage(status === 'production' ? '已转正上线（production）' : '已上线试用档（trial，未经对拍水印）')
       onStatusChanged()
     } catch (e) {
       setError((e as Error).message)

@@ -103,6 +103,25 @@ public sealed class OnboardingGateTests
     }
 
     [Fact]
+    public async Task 转正门禁_门3仍有未确认新关时拒绝()
+    {
+        using var factory = new PlatformFactory();
+        var client = factory.CreateClient();
+        await CompleteAllStepsAsync(client);
+        var store = factory.Services.GetRequiredService<VerificationRecordStore>();
+        var hash = CurrentAdapterHash(factory);
+        store.Insert("sokoban-toy", "gate1", "pass", adapterHash: hash);
+        store.Insert("sokoban-toy", "gate3", "pass", adapterHash: hash,
+            summaryJson: """{"total":3,"matched":0,"red":0,"yellow":0,"fresh":3}""");
+
+        var promote = await client.PostAsync("/api/games/sokoban-toy/status",
+            new StringContent("""{"status":"production"}""", Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.Conflict, promote.StatusCode);
+        Assert.Contains("新关", await promote.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task 转正门禁_六步完成且门1门3证据对应当前版本时放行()
     {
         using var factory = new PlatformFactory();
@@ -111,7 +130,8 @@ public sealed class OnboardingGateTests
         var store = factory.Services.GetRequiredService<VerificationRecordStore>();
         var hash = CurrentAdapterHash(factory);
         store.Insert("sokoban-toy", "gate1", "pass", adapterHash: hash);
-        store.Insert("sokoban-toy", "gate3", "pass", adapterHash: hash, summaryJson: """{"total":3,"red":0}""");
+        store.Insert("sokoban-toy", "gate3", "pass", adapterHash: hash,
+            summaryJson: """{"total":3,"matched":3,"red":0,"yellow":0,"fresh":0}""");
 
         var promote = await client.PostAsync("/api/games/sokoban-toy/status",
             new StringContent("""{"status":"production"}""", Encoding.UTF8, "application/json"));

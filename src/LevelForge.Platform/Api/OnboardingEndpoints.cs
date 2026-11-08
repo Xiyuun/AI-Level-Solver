@@ -112,6 +112,18 @@ public static class OnboardingEndpoints
                 {
                     return Results.Conflict(new { message = "门3 记录不是当前适配层（指纹不一致）：适配层换过，必须重跑门3" });
                 }
+                // 首跑门3 全是"新关"（没有基准）时 verdict 也是 pass，但那只是"待确认集合"，
+                // 不能当作"回归通过"转正：必须先把基准批准/确认，重跑后 fresh=0。
+                var fresh = Gate3FreshCount(gate3.SummaryJson);
+                if (fresh is null || fresh > 0)
+                {
+                    return Results.Conflict(new
+                    {
+                        message = fresh is null
+                            ? "门3 缺少基准统计（fresh）：无法确认回归范围，先重跑门3"
+                            : $"门3 最新一次仍有 {fresh} 个未确认新关：先确认基准并重跑门3，待确认新关必须为 0",
+                    });
+                }
             }
             if (!onboarding.UpdateGameStatus(gameId, body.Status))
             {
@@ -181,6 +193,26 @@ public static class OnboardingEndpoints
         catch (JsonException)
         {
             return json;
+        }
+    }
+
+    // 门3 摘要里的未确认新关数（fresh）；缺失/损坏返回 null（按"无法确认"处理，不允许转正）
+    private static int? Gate3FreshCount(string? summaryJson)
+    {
+        if (string.IsNullOrWhiteSpace(summaryJson))
+        {
+            return null;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(summaryJson);
+            return doc.RootElement.TryGetProperty("fresh", out var fresh) && fresh.TryGetInt32(out var n)
+                ? n
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
