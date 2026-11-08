@@ -22,10 +22,22 @@ public interface ILevelComposer
 
     ComposeResult Compose(string modelOutput, string? levelNumber);  // 拼装原生关卡 JSON；失败返回错误清单
 
+    // 带上下文的重载（默认回退到两参版本，旧 composer 不用改）：
+    // TargetBand/SpecialRequirements/Seed 让 composer 能"按请求变化"，而不是每次产出同一张图
+    ComposeResult Compose(string modelOutput, string? levelNumber, ComposeContext context) =>
+        Compose(modelOutput, levelNumber);
+
     // few-shot 示例转坐标制：示例必须与要求的输出格式一致，否则模型会照着示例写原生 grid
     // 无法转换返回 null（调用方跳过该示例）
     string? DescribeAsCoordinates(string levelJson);
 }
+
+// 拼装上下文：目标档位 + 特殊要求 + 每次生成的随机种子（由流水线注入，避免"重新生成得到同一关"）
+public sealed record ComposeContext(
+    string? LevelNumber,
+    int TargetBand,
+    string? SpecialRequirements,
+    int Seed);
 
 // 拼装结论：LevelJson 非空即成功（此时 Errors 为空）；失败时 Errors 逐条可回喂模型
 public sealed record ComposeResult(string? LevelJson, IReadOnlyList<string> Errors)

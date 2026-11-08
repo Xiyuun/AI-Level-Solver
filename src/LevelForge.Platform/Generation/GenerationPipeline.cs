@@ -55,6 +55,10 @@ public sealed class GenerationPipeline
             facade.Registration, targetBand,
             request.LevelNumber, mechanicsNote, request.SpecialRequirements,
             fewShot, composer?.CompositionSpec);
+        // 每次生成一个随机种子 + 特殊要求哈希：保证"重新生成/换提示词"能得到不同候选，
+        // 而不是 composer 每次返回同一张模板图
+        var composeContext = new ComposeContext(
+            request.LevelNumber, targetBand, request.SpecialRequirements, Random.Shared.Next());
 
         var runId = _store.InsertRun(request.GameId, targetBand,
             request.LevelNumber, request.SpecialRequirements, limit, timeoutMs, PromptBuilder.PromptVersion);
@@ -73,7 +77,7 @@ public sealed class GenerationPipeline
                     $"第 {attempt} 次候选开始（预算内第 {attempt}/{limit} 个）", attempt));
                 var outcome = await RunAttemptAsync(
                     facade, runId, attempt, targetBand, baseMessages, feedback, config, timeoutMs,
-                    composer, maxTokens, request.LevelNumber, ct, progress);
+                    composer, maxTokens, request.LevelNumber, composeContext, ct, progress);
                 attempts.Add(outcome.Attempt);
                 if (outcome.RunEnded)
                 {
@@ -153,8 +157,8 @@ public sealed class GenerationPipeline
         IGameFacade facade, long runId, int attempt, int targetBand,
         List<ChatMessage> baseMessages, (string Class, string Detail)? feedback,
         LlmConfig config, long timeoutMs,
-        ILevelComposer? composer, int maxTokens, string? levelNumber, CancellationToken ct,
-        Action<GenerationProgress>? progress = null)
+        ILevelComposer? composer, int maxTokens, string? levelNumber, ComposeContext composeContext,
+        CancellationToken ct, Action<GenerationProgress>? progress = null)
     {
         var sw = Stopwatch.StartNew();
         var messages = new List<ChatMessage>(baseMessages);
@@ -190,7 +194,9 @@ public sealed class GenerationPipeline
                     $"LLM 调用失败：{chat.Error}", attempt, FailureClass.ApiError));
                 return new AttemptOutcome(apiAttempt, Passed: false, RunEnded: true, apiId);
             }
-            (formatErrors, content) = ValidateCandidate(facade, composer, chat.Content, levelNumber);
+            // 每次调用给一个新种子：同一尝试内的修复轮也不要产出完全相同的候选
+            var attemptContext = composeContext with { Seed = Random.Shared.Next() };
+            (formatErrors, content) = ValidateCandidate(facade, composer, chat.Content, levelNumber, attemptContext);
             if (formatErrors.Count == 0)
             {
                 progress?.Invoke(new GenerationProgress("llm",
@@ -330,7 +336,8 @@ public sealed class GenerationPipeline
     // 双重校验的意义：拼装器自身也可能有 bug，原生校验是最后一道闸（不因中间层存在就跳过）
     // 返回 (错误清单, 可用的原生关卡 JSON)；错误为空时 Content 必非空
     private static (List<string> Errors, string? Content) ValidateCandidate(
-        IGameFacade facade, ILevelComposer? composer, string? modelOutput, string? levelNumber)
+        IGameFacade facade, ILevelComposer? composer, string? modelOutput, string? levelNumber,
+        ComposeContext composeContext)
     {
         var extracted = LlmJson.ExtractJson(modelOutput ?? "");
         if (extracted is null)
@@ -341,7 +348,7 @@ public sealed class GenerationPipeline
         {
             return (facade.FormatErrors(extracted).ToList(), extracted);
         }
-        var composed = composer.Compose(extracted, levelNumber);
+        var composed = composer.Compose(extracted, levelNumber, composeContext);
         if (composed.LevelJson is null)
         {
             return (composed.Errors.ToList(), null);
