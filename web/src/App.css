@@ -339,6 +339,25 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .cl-item .cl-del:hover { color: var(--danger, #c0392b); border-color: var(--danger, #c0392b); }
 
+/* ④三态审核清单：断言 + 判据 + 状态按钮（待确认/已确认/不适用+理由） */
+.cl-item { flex-wrap: wrap; }
+.cl-item .cl-text { display: flex; flex-direction: column; gap: 2px; }
+.cl-item .cl-detail { color: var(--text-3); font-size: 11.5px; line-height: 1.5; }
+.cl-item .cl-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.cl-item .cl-badge-task { color: var(--warning, #b7791f); }
+.cl-item .cl-actions { display: flex; gap: 6px; flex: none; }
+.cl-item .cl-state {
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-3);
+  border-radius: 6px; padding: 1px 8px; font-size: 11px; cursor: pointer;
+}
+.cl-item .cl-state.active { border-color: var(--ok); color: var(--ok); background: var(--surface); font-weight: 600; }
+.cl-item .cl-na-reason {
+  flex: 1 0 100%; margin-top: 4px; padding: 4px 8px;
+  border: 1px solid var(--border); border-radius: 6px; font-size: 12px;
+}
+.cl-item.cl-state-confirmed { border-color: rgba(46, 160, 67, .45); }
+.cl-item.cl-state-na { border-color: rgba(183, 121, 31, .45); }
+
 /* ③"开始生成适配层"引导卡 */
 .adapter-launch {
   border: 2px solid var(--accent, #4a6cf7); border-radius: 12px; padding: 16px 18px;

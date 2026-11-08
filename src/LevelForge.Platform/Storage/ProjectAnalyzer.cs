@@ -109,14 +109,15 @@ public sealed class ProjectAnalyzer(LlmClient llm, SettingsStore settings, GameS
                 {"question":"持续产关（关卡数据外置、可持续新增关卡不改代码）","answer":"yes|no|uncertain","evidence":"…"}
               ],
               "mechanics": ["机制名：一句话规则描述（附证据来源）"],
-              "checklistDraft": [{"group":"A|B|C|D","text":"该玩法特有的审核核对项（具体、可执行）"}],
+              "checklistDraft": [{"group":"A|B|C|D","text":"可签字的断言：写清『谁与谁一致/什么成立 + 预期 + 依据』；不要写『验证…/检查…』这类任务"}],
               "risks": ["适配层制作的风险点（具体）"],
               "hygieneGrade": "良好|一般|纠缠——判据：规则代码与 MonoBehaviour/场景/引擎服务的耦合程度；纠缠=规则状态分散在引擎对象中难以提取序列化",
               "workEstimate": "接入工作量预估（人日区间 + 一句话依据；纠缠时上浮 1~3 人日并明示原因）",
               "summary": "不超过三句话：接入难度与关键结论"
             }
             要求：evidence 必须具体到文件与观察；answer 是 uncertain 时必须说明缺什么信息；
-            mechanics 从代码与关卡数据中归纳，不要臆造；checklistDraft 覆盖该玩法特有语义（至少 3 条）；
+            mechanics 从代码与关卡数据中归纳，不要臆造；checklistDraft 覆盖该玩法特有语义（至少 3 条），
+            每条必须是**可确认的断言**（主语 + 规则 + 预期 + 依据），不要写成“验证/检查”任务；确实无法确认的语义写进 risks；
             hygieneGrade 必须三选一并给出耦合证据，workEstimate 给出区间与依据。
             """;
     }

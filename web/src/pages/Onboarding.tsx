@@ -31,10 +31,14 @@ import {
 import {
   allStepsDone,
   checklistComplete,
+  checklistProgress,
   groupGate3,
+  parseChecklistDetail,
   seedChecklistFromAnalysis,
   stepTitle,
   type ChecklistItem,
+  type ChecklistState,
+  type ChecklistStateEntry,
 } from '../state/onboarding'
 import { ImportPanel } from '../components/ImportPanel'
 import { gate1Checks } from '../state/gate1'
@@ -90,9 +94,9 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   // ③门1
   const [gate1, setGate1] = useState<{ passed: boolean; report: Record<string, { passed: boolean; issues: string[]; notes: string[] }> | null } | null>(null)
 
-  // ④清单：按玩法持久化（step4 detail_json = {items:[...]}），模板+画像派生为初稿，可增删
+  // ④清单：按玩法持久化（step4 detail_json = {items, states}）；每条三态（待确认/已确认/不适用+理由）
   const [items, setItems] = useState<ChecklistItem[]>([])
-  const [checked, setChecked] = useState<number[]>([])
+  const [states, setStates] = useState<ChecklistStateEntry[]>([])
   const [newItemText, setNewItemText] = useState('')
   const [initialized, setInitialized] = useState(false)
 
@@ -120,24 +124,21 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     setChosenCodeRoot(detail.codeRoot || profile?.codeDirCandidates?.[0]?.directory || '')
   }, [detail.gameId, detail.levelsRoot, detail.codeRoot, profile])
 
-  // ④清单初始化：已持久化的用持久化值；否则按 深度分析初稿 > 画像派生 > 纯模板 优先级生成
+  // ④清单初始化：已持久化的用持久化值（兼容旧格式）；否则按 深度分析初稿 > 画像派生 > 纯模板 优先级生成
   useEffect(() => {
     if (initialized) return
     const step4 = tasks.find((t) => t.step === 4)
-    if (step4?.detail) {
-      try {
-        const parsed = JSON.parse(step4.detail) as { items?: ChecklistItem[] }
-        if (Array.isArray(parsed.items) && parsed.items.length > 0) {
-          setItems(parsed.items)
-          setInitialized(true)
-          return
-        }
-      } catch {
-        // 旧格式（纯文本存档）或损坏：走种子路径
-      }
+    const loaded = parseChecklistDetail(step4?.detail, step4?.status ?? 'todo')
+    if (loaded) {
+      setItems(loaded.items)
+      setStates(loaded.states)
+      setInitialized(true)
+      return
     }
     if (detail.projectProfile !== undefined) {   // 详情已加载（null=内置玩法）
-      setItems(seedChecklistFromAnalysis(profile, detail.projectAnalysis))
+      const seeded = seedChecklistFromAnalysis(profile, detail.projectAnalysis)
+      setItems(seeded)
+      setStates(seeded.map((i) => ({ index: i.index, state: 'pending' as ChecklistState })))
       setInitialized(true)
     }
   }, [tasks, profile, detail.projectProfile, detail.projectAnalysis, initialized])
@@ -203,9 +204,10 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   const applyChecklistDraft = () => {
     if (!effectiveAnalysis) return
     const next = seedChecklistFromAnalysis(profile, effectiveAnalysis)
+    const nextStates: ChecklistStateEntry[] = next.map((i) => ({ index: i.index, state: 'pending' }))
     setItems(next)
-    setChecked([])
-    void persistChecklist('todo', next)
+    setStates(nextStates)
+    void persistChecklist('todo', next, nextStates)
     setMessage('清单初稿已写入④（可在④继续增删）')
     // 内联反馈：顶部消息在视口外（按钮在②区、消息在页首）；④未解锁时说明数据已存档不会丢
     setChecklistApplied(
@@ -340,16 +342,42 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     }
   }
 
-  // ④：清单持久化（按玩法；items 全量保存，勾选完成才落 done）
-  // listOverride：调用方刚 setItems 尚未反映到本次渲染闭包时，显式传入新列表（避免旧闭包值覆盖）
-  const persistChecklist = async (status: 'done' | 'todo', listOverride?: ChecklistItem[]) => {
-    const payload = JSON.stringify({ items: listOverride ?? items, updatedAt: new Date().toISOString() })
+  // ④：清单持久化（按玩法；items + states 全量保存；全部有终态才允许 done）
+  // listOverride/statesOverride：调用方刚 setState 尚未反映到本次渲染闭包时，显式传入新值（避免旧闭包覆盖）
+  const persistChecklist = async (
+    status: 'done' | 'todo',
+    listOverride?: ChecklistItem[],
+    statesOverride?: ChecklistStateEntry[],
+  ) => {
+    const payload = JSON.stringify({
+      items: listOverride ?? items,
+      states: statesOverride ?? states,
+      updatedAt: new Date().toISOString(),
+    })
     await markStep(4, status, payload)
   }
 
+  // 三态切换：待确认 → 已确认 / 不适用（不适用必须带理由）；变更即落库，刷新不丢
+  // 注意：副作用（保存）放在 setStates 之外——StrictMode 会双调用 updater，写在里面会重复写库
+  const setItemState = (index: number, next: ChecklistState, reason?: string) => {
+    const merged: ChecklistStateEntry[] = [
+      ...states.filter((s) => s.index !== index),
+      { index, state: next, reason: next === 'na' ? (reason ?? '') : undefined },
+    ]
+    setStates(merged)
+    void persistChecklist(statusOf(4) === 'done' ? 'done' : 'todo', items, merged)
+  }
+
+  const setNaReason = (index: number, reason: string) => {
+    const merged = states.map((s) => (s.index === index ? { ...s, reason } : s))
+    setStates(merged)
+    void persistChecklist(statusOf(4) === 'done' ? 'done' : 'todo', items, merged)
+  }
+
   const submitChecklist = async () => {
-    if (!checklistComplete(checked, items)) {
-      setError('清单未全部勾选项请转用例，禁止直接勾选')
+    const progress = checklistProgress(states, items)
+    if (!checklistComplete(states, items)) {
+      setError(`还有 ${progress.pending} 条待确认；不适用的条目必须填写理由，不能留空`)
       return
     }
     await persistChecklist('done')
@@ -359,15 +387,20 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     const text = newItemText.trim()
     if (!text) return
     const maxIndex = items.reduce((m, i) => Math.max(m, i.index), 0)
-    const next = [...items, { group: 'A' as const, index: maxIndex + 1, text, custom: true }]
+    const next = [...items, { group: 'A' as const, index: maxIndex + 1, text, kind: 'confirm' as const }]
+    const nextStates = [...states, { index: maxIndex + 1, state: 'pending' as const }]
     setItems(next)
+    setStates(nextStates)
     setNewItemText('')
-    void persistChecklist('todo', next)
+    void persistChecklist('todo', next, nextStates)
   }
 
   const removeChecklistItem = (index: number) => {
-    setItems((prev) => prev.filter((i) => i.index !== index))
-    setChecked((prev) => prev.filter((i) => i !== index))
+    const next = items.filter((i) => i.index !== index)
+    const nextStates = states.filter((s) => s.index !== index)
+    setItems(next)
+    setStates(nextStates)
+    void persistChecklist(statusOf(4) === 'done' ? 'done' : 'todo', next, nextStates)
   }
 
   const submitGate2 = async () => {
@@ -406,6 +439,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     { name: '格式说明书 format-spec', ok: detail.formatSpec.length > 0 },
     { name: '规则矩阵 rule-matrix', ok: detail.ruleMatrix.length > 0 },
   ]
+  const checklistStat = checklistProgress(states, items)
 
   // 需求包：纯函数生成（state/requirementPackage.ts）——含工具仓库、契约与内核职责、项目事实、
   // 关卡数据核验提示、导入/门1/测试/交付口径；单测覆盖，避免又退回"只给事实不给规格"
@@ -972,38 +1006,73 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
           ) : (
           <>
           <div className="ob-note">
-            清单 = 通用模板 + 本项目扫描派生条目（<span className="ok-inline">◆</span>）。可直接增删条目；
-            语义歧义必须转用例，禁止直接勾选。
+            每条都是<b>可签字的断言</b>：确认前请对照「判据」核对“这条成立”。
+            确实不适用的条目（例如 v1 未建模特殊猪）请选「不适用」并写理由——<b>不适用 ≠ 跳过</b>，理由会进审计记录。
+            标「待办」的条目来自 AI 草稿（“验证…/检查…”），请先完成验证再确认。
           </div>
           <div className="cl-list">
-            {items.map((item) => (
-              <label key={item.index} className="cl-item">
-                <input
-                  type="checkbox"
-                  checked={checked.includes(item.index)}
-                  onChange={(e) =>
-                    setChecked((prev) => (e.target.checked ? [...prev, item.index] : prev.filter((i) => i !== item.index)))
-                  }
-                />
-                <span className="group-chip">{item.group}</span>
-                <span className="cl-text">{item.index}. {item.text}{item.custom && <span className="cl-badge"> ◆项目派生</span>}</span>
-                <button className="cl-del" onClick={() => removeChecklistItem(item.index)} title="删除该条">删除</button>
-              </label>
-            ))}
+            {items.map((item) => {
+              const entry: ChecklistStateEntry = states.find((s) => s.index === item.index)
+                ?? { index: item.index, state: 'pending' }
+              return (
+                <div key={item.index} className={`cl-item cl-state-${entry.state}`}>
+                  <span className="group-chip">{item.group}</span>
+                  <span className="cl-text">
+                    <span>{item.index}. {item.text}</span>
+                    {item.detail && <span className="cl-detail">判据：{item.detail}</span>}
+                    <span className="cl-badges">
+                      {item.source === 'analysis' && <span className="cl-badge">AI 草稿</span>}
+                      {item.source === 'profile' && <span className="cl-badge">项目派生</span>}
+                      {item.kind === 'task' && <span className="cl-badge cl-badge-task">待办</span>}
+                      {item.kind === 'fact' && <span className="cl-badge">事实核对</span>}
+                    </span>
+                  </span>
+                  <span className="cl-actions">
+                    <button
+                      className={`cl-state ${entry.state === 'confirmed' ? 'active' : ''}`}
+                      onClick={() => setItemState(item.index, 'confirmed')}
+                    >
+                      已确认
+                    </button>
+                    <button
+                      className={`cl-state ${entry.state === 'na' ? 'active' : ''}`}
+                      onClick={() => setItemState(item.index, 'na', entry.reason)}
+                    >
+                      不适用
+                    </button>
+                    <button className="cl-del" onClick={() => removeChecklistItem(item.index)} title="删除该条">删除</button>
+                  </span>
+                  {entry.state === 'na' && (
+                    <input
+                      className="cl-na-reason"
+                      placeholder="不适用理由（必填，会写入本步审计记录）"
+                      value={entry.reason ?? ''}
+                      onChange={(e) => setNaReason(item.index, e.target.value)}
+                    />
+                  )}
+                </div>
+              )
+            })}
           </div>
           <div className="ob-form-row">
             <input
-              placeholder="追加本项目特有核对项（如：胡牌判定与本体一致）"
+              placeholder="追加本项目特有的可确认断言（如：胡牌判定与本体一致）"
               value={newItemText}
               onChange={(e) => setNewItemText(e.target.value)}
             />
             <button onClick={addChecklistItem} disabled={!newItemText.trim()}>追加</button>
           </div>
           <div className="ob-form-row">
-            <button onClick={() => void submitChecklist()}>确认 {checked.length}/{items.length} 条并保存</button>
+            <button
+              onClick={() => void submitChecklist()}
+              disabled={checklistStat.pending > 0}
+              title={checklistStat.pending > 0 ? `还有 ${checklistStat.pending} 条待确认` : '全部条目已有终态'}
+            >
+              保存并完成④（已确认 {checklistStat.confirmed} / 不适用 {checklistStat.na} / 待确认 {checklistStat.pending}）
+            </button>
             <button
               onClick={() => void persistChecklist('todo')}
-              title="清单条目保存在该玩法的向导存档里，下次进入还在"
+              title="清单与每条状态保存在该玩法的向导存档里，下次进入还在"
             >
               仅保存清单（不完成）
             </button>

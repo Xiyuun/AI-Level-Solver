@@ -1,10 +1,23 @@
-// 接入向导纯逻辑测试：清单完备性 / 六步完成度 / 勾选完成判定
+// 接入向导纯逻辑测试：清单完备性（三态）/ 六步完成度 / 门3 四区
 import { describe, expect, it } from 'vitest'
 import type { OnboardingTask } from '../api/client'
-import { REVIEW_CHECKLIST, allStepsDone, checklistComplete, groupGate3, seedChecklist } from './onboarding'
+import {
+  REVIEW_CHECKLIST,
+  allStepsDone,
+  checklistComplete,
+  checklistProgress,
+  groupGate3,
+  parseChecklistDetail,
+  seedChecklist,
+  type ChecklistStateEntry,
+} from './onboarding'
 
 function task(step: number, status: string): OnboardingTask {
   return { step, title: `step${step}`, status, detail: null, updatedAt: '' }
+}
+
+function confirmedAll(): ChecklistStateEntry[] {
+  return REVIEW_CHECKLIST.map((i) => ({ index: i.index, state: 'confirmed' }))
 }
 
 describe('审核清单（skill 详设 §5 四大组 13 条）', () => {
@@ -15,10 +28,12 @@ describe('审核清单（skill 详设 §5 四大组 13 条）', () => {
     expect(REVIEW_CHECKLIST.filter((i) => i.group === 'D')).toHaveLength(2)
     expect(REVIEW_CHECKLIST.map((i) => i.index)).toEqual(Array.from({ length: 13 }, (_, i) => i + 1))
   })
-  it('含假对拍检查与状态可视覆盖关键项', () => {
+
+  it('每条都是"断言 + 判据"，写清与什么一致/依据是什么', () => {
+    expect(REVIEW_CHECKLIST.every((i) => i.text.length > 12 && (i.detail ?? '').length > 5)).toBe(true)
+    expect(REVIEW_CHECKLIST.some((i) => i.text.includes('与游戏本体一致'))).toBe(true)
     expect(REVIEW_CHECKLIST.some((i) => i.text.includes('真实输入路径'))).toBe(true)
     expect(REVIEW_CHECKLIST.some((i) => i.text.includes('可视覆盖'))).toBe(true)
-    expect(REVIEW_CHECKLIST.some((i) => i.text.includes('禁止直接勾选'))).toBe(true)
   })
 })
 
@@ -32,11 +47,66 @@ describe('六步完成度', () => {
   })
 })
 
-describe('清单勾选完成', () => {
-  it('全部条目勾完才完成；缺一条不行', () => {
-    const all = Array.from({ length: 13 }, (_, i) => i + 1)
-    expect(checklistComplete(all, REVIEW_CHECKLIST)).toBe(true)
-    expect(checklistComplete(all.slice(0, 12), REVIEW_CHECKLIST)).toBe(false)
+describe('清单三态完成判定', () => {
+  it('全部条目有终态才完成；缺一条待确认不行', () => {
+    expect(checklistComplete(confirmedAll(), REVIEW_CHECKLIST)).toBe(true)
+    const missing = confirmedAll()
+    missing[5] = { index: REVIEW_CHECKLIST[5].index, state: 'pending' }
+    expect(checklistComplete(missing, REVIEW_CHECKLIST)).toBe(false)
+  })
+
+  it('「不适用」必须写理由，否则不算完成', () => {
+    const states = confirmedAll()
+    states[0] = { index: REVIEW_CHECKLIST[0].index, state: 'na' }
+    expect(checklistComplete(states, REVIEW_CHECKLIST)).toBe(false)
+    states[0] = { index: REVIEW_CHECKLIST[0].index, state: 'na', reason: 'v1 未建模特殊猪' }
+    expect(checklistComplete(states, REVIEW_CHECKLIST)).toBe(true)
+  })
+
+  it('进度统计区分 已确认/不适用/待确认', () => {
+    const states: ChecklistStateEntry[] = [
+      { index: 1, state: 'confirmed' },
+      { index: 2, state: 'na', reason: '不适用' },
+    ]
+    const progress = checklistProgress(states, REVIEW_CHECKLIST)
+    expect(progress.confirmed).toBe(1)
+    expect(progress.na).toBe(1)
+    expect(progress.pending).toBe(11)
+    expect(progress.total).toBe(13)
+  })
+})
+
+describe('向导存档解析（兼容旧格式）', () => {
+  it('旧格式④已完成：视为全部已确认', () => {
+    const detail = JSON.stringify({ items: REVIEW_CHECKLIST.slice(0, 3) })
+    const parsed = parseChecklistDetail(detail, 'done')!
+    expect(parsed.items).toHaveLength(3)
+    expect(parsed.states.every((s) => s.state === 'confirmed')).toBe(true)
+  })
+
+  it('旧格式④未完成：全部待确认；缺 kind 按文本推断', () => {
+    const detail = JSON.stringify({ items: [
+      { group: 'A', index: 1, text: '验证点击后的停位' },
+      { group: 'A', index: 2, text: '胜利判定与游戏本体一致' },
+    ] })
+    const parsed = parseChecklistDetail(detail, 'todo')!
+    expect(parsed.states.every((s) => s.state === 'pending')).toBe(true)
+    expect(parsed.items[0].kind).toBe('task')
+    expect(parsed.items[1].kind).toBe('confirm')
+  })
+
+  it('新格式保留已存状态与不适用理由', () => {
+    const detail = JSON.stringify({
+      items: [{ group: 'A', index: 1, text: '滑行规则与游戏本体一致', kind: 'confirm' }],
+      states: [{ index: 1, state: 'na', reason: 'v1 子集不涉及' }],
+    })
+    const parsed = parseChecklistDetail(detail, 'todo')!
+    expect(parsed.states[0]).toEqual({ index: 1, state: 'na', reason: 'v1 子集不涉及' })
+  })
+
+  it('损坏/纯文本存档返回 null（回退种子清单）', () => {
+    expect(parseChecklistDetail('报告：接入难度高', 'todo')).toBeNull()
+    expect(parseChecklistDetail(null, 'todo')).toBeNull()
   })
 })
 
