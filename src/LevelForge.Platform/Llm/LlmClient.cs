@@ -72,16 +72,26 @@ public sealed class LlmClient
     // 聊天补全：一次无状态单问单答（生成端形态铁律：无 agent，循环由流水线代码驱动）
     // jsonMode：声明 response_format=json_object，把"只输出 JSON"从提示词祈祷变成服务端约束；
     // 服务端不支持该字段时自动去掉重发一次（不因兼容性问题让整轮生成失败）
+    // disableThinking：关闭推理模型的思考输出（思考与正文共用 max_tokens，长任务里思考会吃光预算导致正文为空）。
+    // 服务端不认识该字段时同样去掉重发一次（OpenAI 兼容网关兼容）。
     public async Task<ChatResult> ChatAsync(
         LlmConfig config, IReadOnlyList<ChatMessage> messages,
         double temperature = 0.8, int maxTokens = DefaultMaxTokens, bool jsonMode = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool disableThinking = false)
     {
-        var result = await SendAsync(config, messages, temperature, maxTokens, jsonMode, ct);
-        if (jsonMode && !result.Ok && result.Error is { } error
-            && error.StartsWith("HTTP 400", StringComparison.Ordinal))
+        var result = await SendAsync(config, messages, temperature, maxTokens, jsonMode, disableThinking, ct);
+        if (!result.Ok && result.Error is { } error && error.StartsWith("HTTP 400", StringComparison.Ordinal))
         {
-            return await SendAsync(config, messages, temperature, maxTokens, jsonMode: false, ct);
+            if (jsonMode)
+            {
+                result = await SendAsync(config, messages, temperature, maxTokens, jsonMode: false, disableThinking, ct);
+            }
+            if (disableThinking && !result.Ok && result.Error is { } second
+                && second.StartsWith("HTTP 400", StringComparison.Ordinal))
+            {
+                // 服务端不认 thinking 字段：去掉再试一次；不能因为兼容性把整轮生成打死
+                result = await SendAsync(config, messages, temperature, maxTokens, jsonMode: false, disableThinking: false, ct);
+            }
         }
         return result;
     }
@@ -89,7 +99,7 @@ public sealed class LlmClient
     // 单次请求发送：所有失败转为结论返回（用户取消除外）
     private async Task<ChatResult> SendAsync(
         LlmConfig config, IReadOnlyList<ChatMessage> messages,
-        double temperature, int maxTokens, bool jsonMode, CancellationToken ct)
+        double temperature, int maxTokens, bool jsonMode, bool disableThinking, CancellationToken ct)
     {
         if (!config.IsConfigured)
         {
@@ -101,19 +111,23 @@ public sealed class LlmClient
             var messagePayload = messages
                 .Select(m => new { role = m.Role, content = m.Content })
                 .ToArray();
-            // jsonMode 时附加 response_format，否则完全不出现该字段（避免严格服务端拒绝 null）
-            object body = jsonMode
-                ? new
-                {
-                    model = config.Model, messages = messagePayload, temperature,
-                    max_tokens = maxTokens, stream = false,
-                    response_format = new { type = "json_object" }
-                }
-                : new
-                {
-                    model = config.Model, messages = messagePayload, temperature,
-                    max_tokens = maxTokens, stream = false
-                };
+            // 按需附加字段：不用匿名对象置 null（严格服务端会拒绝 null 字段）
+            var body = new Dictionary<string, object?>
+            {
+                ["model"] = config.Model,
+                ["messages"] = messagePayload,
+                ["temperature"] = temperature,
+                ["max_tokens"] = maxTokens,
+                ["stream"] = false
+            };
+            if (jsonMode)
+            {
+                body["response_format"] = new { type = "json_object" };
+            }
+            if (disableThinking)
+            {
+                body["thinking"] = new { type = "disabled" };
+            }
             var payload = JsonSerializer.Serialize(body, BodyOptions);
             using var request = new HttpRequestMessage(
                 HttpMethod.Post, config.BaseUrl.TrimEnd('/') + "/chat/completions")

@@ -71,24 +71,28 @@ public sealed class AdapterGenRunner(
         var gate1Passed = false;
         var gate1Message = "";
         var lastError = "";
+        var lastFailure = "";                       // 最近一轮失败原因（超时/正文为空/格式不符/编译/装载/门1），用于最终错误信息
+        var genTokens = MaxGenTokens;               // 逐轮可提升：正文为空说明输出预算仍不够
 
         for (var round = 1; round <= MaxRounds; round++)
         {
             ct.ThrowIfCancellationRequested();
             if (feedback is not null)
             {
-                messages.Add(new ChatMessage("user", "上一版的问题（必须全部修复后重新输出全部源文件 JSON）：\n" + feedback));
+                messages.Add(new ChatMessage("user", "上一版的问题（必须全部修复后重新输出全部源文件）：\n" + feedback));
             }
             job.Append("生成", $"第 {round}/{MaxRounds} 轮：调用模型产出适配层源码（温度 0.2）", round);
 
-            var chat = await llm.ChatAsync(config, messages, temperature: 0.2, MaxGenTokens, jsonMode: false, ct);
+            // 关闭推理输出：思考与正文共用 max_tokens，长代码任务里思考会吃光预算（实测四轮正文全空）
+            var chat = await llm.ChatAsync(config, messages, temperature: 0.2, genTokens,
+                jsonMode: false, ct, disableThinking: true);
             if (!chat.Ok)
             {
                 // 超时/偶发网络错误：计入轮次回喂重试，不一票否决（推理模型单轮可达数分钟）
                 if (chat.Error?.Contains("超时") == true && round < MaxRounds)
                 {
+                    lastFailure = $"第 {round} 轮调用超时（{config.TimeoutSeconds}s）";
                     feedback = "上一轮生成超时。请输出更精简的适配层（聚焦可编译的最小实现，其他文件下一轮补充）。";
-                    messages.Add(new ChatMessage("user", feedback));
                     job.Append("生成", $"第 {round} 轮调用超时——精简要求后重试", round);
                     continue;
                 }
@@ -96,9 +100,12 @@ public sealed class AdapterGenRunner(
             }
             if (string.IsNullOrWhiteSpace(chat.Content))
             {
-                // 推理模型的思考会占用输出预算：content 为空说明预算被思考耗尽——加大预算重试
-                feedback = $"输出预算被推理思考耗尽（正文为空）。请在完整输出思考之后，必须输出至少一个 FILE 标记块。";
-                job.Append("生成", $"第 {round} 轮正文为空（推理耗尽预算）——加大预算回喂", round);
+                // 关闭思考后正文仍为空：多半是输出上限本身不够（或服务端忽略了 thinking 参数）
+                lastFailure = $"第 {round} 轮正文为空（输出预算不足或被思考占用）";
+                var next = Math.Min(genTokens + 8_192, 32_768);
+                feedback = $"正文为空（token 上限 {genTokens} 不足）。请直接输出 FILE 标记块，不要输出思考过程或解释；只保留可编译的最小实现。";
+                job.Append("生成", $"第 {round} 轮正文为空——输出上限 {genTokens}→{next} 后重试", round);
+                genTokens = next;
                 continue;
             }
             messages.Add(new ChatMessage("assistant", chat.Content));
@@ -106,7 +113,8 @@ public sealed class AdapterGenRunner(
             var files = ExtractFiles(chat.Content, out var parseError);
             if (files.Count == 0)
             {
-                feedback = $"输出不符合结构要求：{parseError ?? "未找到 files 数组"}。请重新输出完整 JSON。";
+                lastFailure = $"第 {round} 轮输出不符合 FILE 标记格式：{parseError ?? "未找到 FILE 标记块"}";
+                feedback = $"输出不符合结构要求：{parseError ?? "未找到 FILE 标记块"}。请用 // ==== FILE: 文件名.cs ==== 与 // ==== END FILE ==== 包裹每个源文件，重新输出。";
                 job.Append("校验", $"第 {round} 轮输出不可用：{feedback}", round);
                 continue;
             }
@@ -118,6 +126,7 @@ public sealed class AdapterGenRunner(
             {
                 compiled = false;
                 lastError = string.Join("\n", compileErrors.Take(6));
+                lastFailure = $"第 {round} 轮编译失败：{compileErrors[0]}（共 {compileErrors.Count} 条）";
                 feedback = "编译错误（file(line,col): error 描述），逐条修复：\n" + string.Join("\n", compileErrors.Take(12));
                 job.Append("编译", $"第 {round} 轮编译失败：{compileErrors.Count} 条错误——回喂修复", round);
                 continue;
@@ -131,6 +140,7 @@ public sealed class AdapterGenRunner(
             if (load.Loaded != "ok")
             {
                 lastError = load.Error ?? $"装载失败（{load.Loaded}）";
+                lastFailure = $"第 {round} 轮装载失败：{lastError}";
                 feedback = "装载失败：" + lastError + "。检查 GameId 绑定与门面实现后重新输出全部源文件。";
                 job.Append("装载", $"第 {round} 轮装载失败：{lastError}", round);
                 continue;
@@ -142,6 +152,7 @@ public sealed class AdapterGenRunner(
             gate1Message = gate1.Message;
             if (!gate1Passed)
             {
+                lastFailure = $"第 {round} 轮门1 未通过：{(gate1.Issues.Count > 0 ? gate1.Issues[0] : gate1Message)}";
                 feedback = "门1 未通过，逐条修复后重新输出全部源文件：\n" + (gate1.Issues.Count > 0
                     ? string.Join("\n", gate1.Issues.Take(12))
                     : gate1Message);
@@ -155,8 +166,12 @@ public sealed class AdapterGenRunner(
                 Summary: $"第 {round} 轮生成成功并通过门1。适配层为初稿：请完成④人工审核清单等验收步骤后再转正。");
         }
 
-        var finalMessage = $"已达 {MaxRounds} 轮上限仍未通过（{(compiled ? "门1 未绿" : "编译未通过")}）。" +
-                           "建议改用「需求包+外部编程助手」路径，或换更强模型后重试。最近问题：\n" + lastError;
+        // 最终错误必须带"最近问题"：此前超时/正文为空/格式不符三类的失败不写 lastError，界面上只剩空冒号
+        var reason = !string.IsNullOrWhiteSpace(lastFailure)
+            ? lastFailure
+            : (compiled ? "门1 未通过（无具体问题记录）" : "未产出可编译源文件（无具体错误记录）");
+        var finalMessage = $"已达 {MaxRounds} 轮上限仍未通过（{(compiled ? "门1 未通过" : "未产出可编译源文件")}）。" +
+                           "建议改用「需求包+外部编程助手」路径，或换更强模型后重试。最近问题：\n" + reason;
         return new AdapterGenReport(
             Success: false, Rounds: MaxRounds, Compiled: compiled, Gate1Passed: gate1Passed,
             Gate1Message: gate1Message, Error: finalMessage, WorkspaceDir: workspace,

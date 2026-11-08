@@ -48,11 +48,14 @@ public static class AdapterGenPrompt
             - LevelForge.Kernel.Replay：ReplayEngine、TapeMetadata、TapeJson
             - LevelForge.Kernel.Search：BfsSolver（如用平台搜索）
 
+            {{AdapterGenContractReference.Build()}}
+
             # 求解装配骨架（照此实现；平台按此验收，不是随性发挥）
             ```
             var level = <把 command.LevelJson 解析成你的 TLevel>;             // 非法数据抛 ArgumentException
             var adapter = new <你的适配器>();                                  // 实现 IGameAdapter<TLevel,TState,TMove>
-            var bundle = new AdapterBundle<TLevel,TState,TMove>("{{gameId}}", "1.0.0", adapter, adapter);  // 协议同实例或单列
+            var bundle = new AdapterBundle<TLevel,TState,TMove>("{{gameId}}", "1.0.0", adapter,
+                <executionProtocol>);                                          // 执行协议：适配器同时实现 IExecutionProtocol 时可传同一个实例，否则传第二个实例
             var result = <用 BfsSolver 或你自己的确定性搜索，返回内核 SolveResult>;
             // 结论必须按内核五维度表达：status/optimality/graphComplete/terminationReason/metricsScope；
             // 预算耗尽 = ResourceLimit（未知），只有完整遍历/穷尽才可 UnsolvableProven；不要伪造 Solved。

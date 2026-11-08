@@ -169,6 +169,63 @@ public sealed class AdapterGenTests
     }
 
     [Fact]
+    public void 契约速查_枚举成员与构造器参数来自真实程序集()
+    {
+        // 实测路径 A 的编译错误集中在"猜枚举成员/少传构造参数"；契约速查必须列出真实成员与参数
+        var reference = AdapterGenContractReference.Build();
+        Assert.Contains("UnsolvableProven", reference);          // SolveStatus 真实成员（模型曾猜 Unknown）
+        Assert.Contains("NotProven", reference);                 // Optimality 真实成员（模型曾猜 Optimal）
+        Assert.Contains("GoalFound", reference);                 // TerminationReason 真实成员（模型曾猜 GoalReached）
+        Assert.Contains("ExpandedPrefix", reference);            // MetricsScope 真实成员（模型曾猜 Search）
+        Assert.Contains("IExecutionProtocol", reference);        // 适配器必须同时实现执行协议
+        Assert.Contains("SceneSnapshot(BoardSize", reference);   // 少传 Cells 的坑
+        Assert.Contains("PlayState(SceneSnapshot", reference);   // 少传 MovesExecuted 的坑
+    }
+
+    [Fact]
+    public async Task 平台内生成_四轮正文为空_最终错误不得为空()
+    {
+        var projectDir = MakeCocosProject("gen-empty");
+        var gameId = "gen-empty";
+        using var factory = FactoryWithLlm(["", "", "", ""]);
+        var client = factory.CreateClient();
+        try
+        {
+            await PostJsonAsync(client, "/api/projects/import", new { directory = projectDir });
+            await client.PutAsync("/api/settings", new StringContent(
+                JsonSerializer.Serialize(new Dictionary<string, JsonElement>
+                {
+                    ["llm.baseUrl"] = JsonSerializer.SerializeToElement("http://llm.test"),
+                    ["llm.model"] = JsonSerializer.SerializeToElement("test-model"),
+                    ["llm.apiKey"] = JsonSerializer.SerializeToElement("k"),
+                }, Json), Encoding.UTF8, "application/json"));
+
+            var start = await PostJsonAsync(client, $"/api/games/{gameId}/adapter-gen", new { });
+            Assert.Equal(HttpStatusCode.Accepted, start.StatusCode);
+            var jobId = JsonSerializer.Deserialize<JsonElement>(await start.Content.ReadAsStringAsync()).GetProperty("jobId").GetInt64();
+
+            JsonElement? final = null;
+            for (var i = 0; i < 30; i++)
+            {
+                await Task.Delay(300);
+                var snap = JsonSerializer.Deserialize<JsonElement>(await client.GetStringAsync($"/api/adapter-gen/{jobId}"));
+                if (snap.GetProperty("status").GetString() != "running") { final = snap; break; }
+            }
+            Assert.True(final.HasValue, "空正文任务未在 9s 内收口");
+            Assert.Equal("failed", final!.Value.GetProperty("status").GetString());
+            var error = final.Value.GetProperty("error").GetString() ?? "";
+            // 此前四轮空正文时 lastError 为空，界面只剩"最近问题："后面空白；现在必须带具体原因
+            Assert.Contains("正文为空", error);
+            var after = error[(error.IndexOf("最近问题：", StringComparison.Ordinal) + "最近问题：".Length)..].Trim();
+            Assert.False(string.IsNullOrWhiteSpace(after), "最近问题不得为空：" + error);
+        }
+        finally
+        {
+            try { Directory.Delete(projectDir, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task 平台内生成_编译错误回喂后第二轮成功_门1绿且adapterReady翻转()
     {
         var projectDir = MakeCocosProject("gen-ok");

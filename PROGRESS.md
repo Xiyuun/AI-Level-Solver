@@ -292,3 +292,15 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
 - **门2 驱动向导化**：`Gate2DriverSuggester` 按项目结构探测 `PairingHarness.cs`、`ProjectVersion.txt`、Unity Hub 安装路径，生成含 `{levelFile}/{tapeFile}/{outputFile}` 的 batchmode 命令；端点 `GET /api/games/{id}/gate2-driver/suggest`；向导①新增"探测 Unity 驱动并预填"按钮 + 事实/待办列表（找不到 Unity.exe 时用 `<UnityEditorPath>` 占位符并提示替换）。
 - **多套关卡管线提示**：扫描观察在 top2 候选共键不同时输出"发现多套关卡数据管线：A（499，共键…）与 B（110，共键…）——导入前确认用哪一套"。
 - 测试：后端 **289→294**（+路径A提示词、+多管线观察、+驱动建议 2 单测与端点），前端 **79→80**（+样例原文）；piggyfarm 实测：多管线提示出现、Gate2 建议 `applicable=true`（harness + Unity 2022.3.62f3c1；Unity 路径未自动找到→占位符）、扫描预览可用。
+
+### 10.11 路径 A 生成链路修复：思考开关 + 契约速查 + 失败原因（2026-11-08）
+
+用户实测路径 A 仍报"4 轮上限、编译未通过、最近问题为空"，按 job 快照定位并修复：
+
+- **现场证据**：`GET /api/adapter-gen/1` 快照显示 4 轮全部「正文为空（推理耗尽预算）」、每轮约 99s、最终错误只有空冒号——deepseek-flash 的 `reasoning_content` 与正文共用 `max_tokens`，长代码任务里思考吃光 16K 预算；且超时/空正文/格式不符三类失败不写 `lastError`。
+- **修复 1（根因）**：`LlmClient.ChatAsync` 新增 `disableThinking`（请求体 `thinking:{"type":"disabled"}`，服务端不认该字段时自动去掉重发一次）；AdapterGen 每轮关闭思考。实测 2048 预算默认思考时正文 0 字符、关闭后正文正常返回。
+- **修复 2（失败可读）**：`AdapterGenRunner` 统一记录 `lastFailure`（超时/正文为空/格式/编译/装载/门1），最终错误不再空白；正文为空时输出上限逐轮 16384→32768；修正超时分支重复回喂。
+- **修复 3（契约可读）**：新增 `AdapterGenContractReference`——从平台程序集反射生成枚举成员/构造器参数/接口成员/静态方法清单，注入路径 A 系统提示词。上一轮修复后模型虽能产出 7 个源文件，但编译错误从 2 涨到 20，全是猜成员：`Optimality.Optimal`、`TerminationReason.GoalReached`、`MetricsScope.Search`、`SceneSnapshot` 少传 `Cells`、适配器未实现 `IExecutionProtocol`；契约速查直接消除这类错误。
+- **实测三段**：修复前 4×99s 全空正文且无原因 → 只修思考开关：4 轮均产 7 文件、2→20 条编译错误 → 加契约速查：**第 2 轮编译通过 + 门1 全绿 + adapterReady 翻转，总耗时 57s**（第 1 轮仅 2 条编译错误回喂）。
+- 测试：后端 **294→298**（+LlmClient 思考开关/兼容回退、+空正文错误非空、+契约速查内容），前端 80 不变。
+- 注意：本次验证在 piggyfarm 行上注册了一个 trial 适配层（`data/plugins/piggyfarm/piggyfarm.dll`）；若改用路径 B：先停平台删该插件目录再启动（插件装载时 DLL 被锁，直接上传会 409）。
