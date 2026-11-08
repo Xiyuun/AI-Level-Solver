@@ -28,6 +28,26 @@ public sealed class DatabaseAndSeedTests : IDisposable
     }
 
     [Fact]
+    public void 数据目录_相对路径构造_规范化为绝对路径()
+    {
+        // 回归（MSB1009）：默认配置 data 是相对路径。若 DataDir 原样保留相对形式，
+        // 适配层生成工作区也会是相对路径；dotnet build 以该工作区为 cwd 再拼接它，
+        // 会被二次解析成 data/adapter-gen/<game>/data/... → 项目文件不存在
+        var rel = "lf-rel-" + Guid.NewGuid().ToString("N");
+        var db = new AppDatabase(rel);
+        try
+        {
+            Assert.True(Path.IsPathRooted(db.DataDir), "DataDir 必须是绝对路径：" + db.DataDir);
+            Assert.Equal(Path.GetFullPath(rel), db.DataDir);
+            Assert.True(Path.IsPathRooted(db.DbPath), "DbPath 必须是绝对路径：" + db.DbPath);
+        }
+        finally
+        {
+            try { if (Directory.Exists(db.DataDir)) Directory.Delete(db.DataDir, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public void 种子_注册玩具玩法与内置关()
     {
         var db = new AppDatabase(_dir);

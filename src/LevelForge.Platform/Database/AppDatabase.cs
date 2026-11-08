@@ -11,9 +11,13 @@ public sealed class AppDatabase
 
     public AppDatabase(string dataDir)
     {
-        DataDir = dataDir;
-        DbPath = Path.Combine(dataDir, "levelforge.db");
-        Directory.CreateDirectory(dataDir);
+        // 规范化为绝对路径：默认配置是相对路径 "data"，若原样保存，所有由它拼出的路径
+        // （磁带、插件、适配层生成工作区）也都是相对的；下游一旦以这些目录为 WorkingDirectory
+        // 再拼接它们（如 dotnet build <workspace>/x.csproj），相对路径会被二次解析成
+        // data/adapter-gen/<game>/data/adapter-gen/... → MSB1009（项目文件不存在）
+        DataDir = Path.GetFullPath(dataDir);
+        DbPath = Path.Combine(DataDir, "levelforge.db");
+        Directory.CreateDirectory(DataDir);
     }
 
     // 统一时间戳：ISO-8601 UTC（落库列全用这个口径）

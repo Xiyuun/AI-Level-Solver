@@ -45,7 +45,11 @@ builder.Services.AddSingleton<LevelImporter>();       // 原生关卡导入（�
 builder.Services.AddSingleton<ProjectImporter>();     // 项目导入（三轮 N10：选目录 → 识别 Unity/Cocos → 登记玩法）
 builder.Services.AddSingleton<ProjectAnalyzer>();     // 项目深度分析（三轮 N12 完整版 B：平台内 LLM 资格评估，解冻记录 §五 D8）
 builder.Services.AddSingleton<LevelForge.Platform.Batch.BatchService>();   // 批量生产（同一流水线的调度层）
-builder.Services.AddHttpClient<LlmClient>();            // LLM 客户端：OpenAI 兼容协议，实例自带 key
+// LLM 客户端：OpenAI 兼容协议，实例自带 key。
+// HttpClient.Timeout 必须置为无限：其默认值 100s 会先于 LlmClient 自己按 llm.timeoutSeconds 建的
+// CancellationTokenSource（适配层生成下限 180s、可调到 300s）生效，长调用会被 100s 掐断并重试，
+// 每轮重发整份提示词（费用翻倍），错误信息还会误报成"调用超时（180s）"
+builder.Services.AddHttpClient<LlmClient>(c => c.Timeout = System.Threading.Timeout.InfiniteTimeSpan);
 
 #endregion
 

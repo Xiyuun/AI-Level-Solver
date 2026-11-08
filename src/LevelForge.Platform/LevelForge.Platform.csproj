@@ -15,6 +15,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 运行时数据目录在项目内（默认 data/）：适配层生成工作区会写入 .cs 与 obj/bin。
+         不排除的话它们会被默认编译项收进平台项目——轻则生成稿里的类型缺失让平台编译失败，
+         重则嵌套 obj 里的 AssemblyInfo 触发 CS0579 重复特性。data/ 永远不是平台源码。
+         注意：不能写成 plugins/**（与源码目录 Plugins/ 大小写不敏感重名），运行时插件目录
+         data/plugins 已被 data/** 覆盖。 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);data/**</DefaultItemExcludes>
   </PropertyGroup>
 
 </Project>

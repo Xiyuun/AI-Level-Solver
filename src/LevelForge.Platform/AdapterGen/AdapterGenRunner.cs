@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -229,6 +230,12 @@ public sealed class AdapterGenRunner(
             - SolveResult 构造参数：(SolveStatus Status, Optimality Optimality, bool GraphComplete, TerminationReason TerminationReason, MetricsScope MetricsScope, IReadOnlyList<MoveRecord> Solution, SearchMetrics? Metrics=null, string? ErrorMessage=null)
             - ComplianceReport 由五个 ComplianceResult 组成（DependencyScan/StateKeyDiscrimination/Purity/Determinism/KernelSelfTest），用 ComplianceResult.Pass(kind, notes) 构造
 
+            # using 命名空间（严格照抄；缺一个就会 CS0246，编译器不会替你猜）
+            - LevelForge.Platform.Facades：IGameFacade、GameRegistration、SolveCommand、PlatformSolve、PlayState、PlayMove、AdapterFingerprint
+            - LevelForge.Kernel.Contracts：SolveResult、SearchMetrics、MoveRecord、SolveStatus、Optimality、TerminationReason、MetricsScope、SolutionTape、SceneSnapshot、TapeConstants
+            - LevelForge.Kernel.Hosting：ComplianceReport、ComplianceResult、ComplianceCheckKind
+            - LevelForge.Kernel.Analysis：DifficultyAssessment
+
             # 诚实语义（硬约束）
             - 非法关卡数据必须返回错误/抛异常，禁止静默修复；求解未证明不冒充结论
             - 求解策略：优先实现基于关卡数据的确定性搜索（如广度优先/状态去重）；确定做不到时返回 ResourceLimit 并如实说明，不要伪造 Solved
@@ -315,31 +322,55 @@ public sealed class AdapterGenRunner(
 
     private static List<string> Compile(string workspace, string csprojName, CancellationToken ct)
     {
+        // 项目文件必须用绝对路径：workspace 可能来自相对数据目录（默认 "data"），而以下 WorkingDirectory
+        // 已经切到 workspace，再把相对 workspace 拼进参数会被 dotnet 二次解析成
+        // data/adapter-gen/<game>/data/adapter-gen/<game>/x.csproj → MSB1009 项目文件不存在。
+        // 该错误模型无从修复，曾导致 4 轮生成额度全部耗尽在平台自身的路径问题上。
+        var projectFile = Path.GetFullPath(Path.Combine(workspace, csprojName));
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"build \"{Path.Combine(workspace, csprojName)}\" -v q --nologo",
-            WorkingDirectory = workspace,
+            Arguments = $"build \"{projectFile}\" -v q --nologo",
+            WorkingDirectory = Path.GetFullPath(workspace),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        using var proc = Process.Start(psi)!;
-        var stdout = proc.StandardOutput.ReadToEndAsync(ct);
-        var stderr = proc.StandardError.ReadToEndAsync(ct);
-        if (!proc.WaitForExitAsync(ct).Wait(CompileTimeoutMs, ct))
+        Process proc;
+        try
         {
-            try { proc.Kill(true); } catch { }
-            return ["dotnet build 超时（180s）"];
+            proc = Process.Start(psi)!;
         }
-        var text = stdout.Result + "\n" + stderr.Result;
-        var errors = text.Split('\n')
-            .Where(l => l.Contains("error ", StringComparison.OrdinalIgnoreCase))
-            .Select(l => l.Trim())
-            .Take(20)
-            .ToList();
-        return errors;
+        catch (Win32Exception ex)
+        {
+            // dotnet 不在 PATH：重试/回喂模型都不会变好，直接终止任务并给出可操作提示
+            throw new AdapterGenException($"无法启动 dotnet 编译（{ex.Message}）：请确认平台进程的 PATH 里有 .NET 10 SDK，或先关闭占用构建产物的旧实例");
+        }
+        using (proc)
+        {
+            var stdout = proc.StandardOutput.ReadToEndAsync(ct);
+            var stderr = proc.StandardError.ReadToEndAsync(ct);
+            if (!proc.WaitForExitAsync(ct).Wait(CompileTimeoutMs, ct))
+            {
+                try { proc.Kill(true); } catch { }
+                return ["dotnet build 超时（180s）"];
+            }
+            var text = stdout.Result + "\n" + stderr.Result;
+            var errors = text.Split('\n')
+                .Where(l => l.Contains("error ", StringComparison.OrdinalIgnoreCase))
+                .Select(l => l.Trim())
+                .Take(20)
+                .ToList();
+            // 平台环境类错误（找不到项目 / dotnet 不可用）不是模型能修的，直接终止而不是回喂 4 轮
+            if (errors.Any(l => l.Contains("MSB1009", StringComparison.OrdinalIgnoreCase)
+                                || l.Contains("不是内部或外部命令", StringComparison.OrdinalIgnoreCase)
+                                || l.Contains("is not recognized", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new AdapterGenException("平台编译环境异常，生成已终止（不是模型输出问题）：" + errors[0]);
+            }
+            return errors;
+        }
     }
 
     // 编译产物 → 插件目录：拷贝输出目录全部 DLL，排除契约程序集（平台共享，绝不复制——防类型分裂）
