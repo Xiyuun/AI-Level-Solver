@@ -27,13 +27,15 @@ if not exist "web\dist" (
 )
 
 echo [run] starting platform at http://localhost:5000  ^(press Ctrl+C to stop^)
-rem 端口占用预检：已有一个实例在跑时，重新构建会被它锁定的 DLL 卡死（MSB3026/3027 刷屏）——
-rem 先给出明确提示再停，而不是让用户面对半屏构建报错
+rem Port precheck: a LevelForge instance already listening on 5000 keeps the built DLLs locked,
+rem so a rebuild would hang (MSB3026/3027 flood). Fail fast with a clear message instead.
+rem ASCII only in this file: cmd.exe parses batch files in the OEM codepage, so UTF-8 text turns
+rem into mojibake and can even be executed as commands. Keep every .cmd file pure ASCII + CRLF.
 netstat -ano | findstr ":5000" | findstr "LISTENING" >nul 2>nul
 if !errorlevel!==0 (
-  echo [run] 端口 5000 已被占用：很可能已有一个 LevelForge 实例在运行。
-  echo [run] 新实例构建会被旧实例锁定的 DLL 卡死。请先关闭旧实例（关掉它的窗口，
-  echo [run] 或 taskkill /F /IM LevelForge.Platform.exe）后再运行本脚本。
+  echo [run] port 5000 is already in use: a LevelForge instance is probably still running.
+  echo [run] A new instance would hang on DLLs locked by the old one. Close it first:
+  echo [run] close its window, or run taskkill /F /IM LevelForge.Platform.exe, then retry.
   pause
   exit /b 1
 )
