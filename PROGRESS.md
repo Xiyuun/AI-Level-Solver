@@ -464,3 +464,25 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
   - 实测修复后：请求到完成 **1.6 秒**（此前 elapsed 202 秒但真正生成只 1.3 秒）。
 - 仍留在适配层的专属内容：6 猪模块库、6 个槽位、质量门规则（朝向/受阻/初始可走）、猪数要求解析、难度阈值——这些属于游戏知识，等 composer SDK/真实关变异器再抽象。
 - 测试：平台 301、适配层 23、前端 95。
+
+### 10.25 生成"格式不合法"误判：约束冲突被当成模型格式错误（2026-11-08）
+
+用户截图：目标 2 档 + "至少包含30只猪" → 7/7 候选"格式不合法"，日志里是
+"第2档模板只有24只"、"band=3 与目标难度2不一致"。
+
+- **根因**：这不是 JSON 格式错误，而是 **需求不可满足**（2 档模板容量 24 < 30）和 **composer 与模型对 band 的争夺**。
+  - composer 用 `ComposeResult.Fail`（格式类）返回容量冲突；流水线把 composer 的所有失败都当成"模型输出格式问题"，
+    进入修复重试（每候选 3 次调用）→ 模型改不了几何 → 7 候选 × 3 次全废。
+  - composer 还要求模型输出的 band 必须等于目标档；模型偶尔回 band=3，又被当成格式错误重试。
+- **契约**：
+  - `ComposeFailureKind { Format, Constraint }`；`ComposeResult.Reject` 表示约束失败；
+  - `ILevelComposer.ValidateContext(ComposeContext)` 生成前可行性检查（默认空实现）。
+- **流水线**：
+  - 调 LLM **之前**先 `ValidateContext`；不可满足直接 `GenerationException("生成参数不可满足：…")`，
+    不产生运行/候选，不烧 LLM 调用；
+  - composer 返回 Constraint 时直接记 `constraint_violation`，不再进格式修复重试。
+- **PiggyFarm composer**：
+  - 用 `ValidateContext` 检查档位容量（1 档 6 / 2 档 24 / 3 档 36）与"至少 N 只猪"；
+  - band 以目标档为准，模型输出的 band 只作提示，不再因不一致判格式错误。
+- 实测：目标 2 档 + ≥30 只 → **11ms 失败**，错误"第 2 档模板最多 24 只猪，无法满足至少 30 只；请换更高档位或降低数量要求"，0 次 LLM、0 候选；正常 2 档仍 0.9s 成功。
+- 测试：适配层 **28**（+5 预检/空对象/band 忽略/Constraint 类型），平台 301，前端 95。

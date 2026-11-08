@@ -50,6 +50,23 @@ public sealed class GenerationPipeline
         var composer = facade as ILevelComposer;
         var maxTokens = facade is ITokenBudgetHint hint ? hint.EstimateLevelTokens(request.LevelNumber) : 8192;
         var mechanicsNote = PromptBuilder.MechanicsNoteFor(facade.Registration.MechanicsJson, request.LevelNumber);
+        // 每次生成一个随机种子，并混入编号/特殊要求的稳定哈希：保证"重新生成/换提示词"能得到不同候选。
+        // 种子派生放在流水线（通用层），composer 只消费 Seed——不必每个玩法自己实现提示词哈希。
+        var composeContext = new ComposeContext(
+            request.LevelNumber, targetBand, request.SpecialRequirements,
+            Random.Shared.Next() ^ StableHash(request.LevelNumber ?? "") ^ StableHash(request.SpecialRequirements ?? ""));
+
+        // 生成前参数可行性检查：例如"2 档最多 24 只猪，无法满足 ≥30 只"。
+        // 这是约束冲突，不是模型格式错误——必须在调 LLM 前失败，不能回喂模型反复重试。
+        if (composer is not null)
+        {
+            var contextErrors = composer.ValidateContext(composeContext);
+            if (contextErrors.Count > 0)
+            {
+                throw new GenerationException("生成参数不可满足：" + string.Join("；", contextErrors));
+            }
+        }
+
         // 模板/坐标制 composer 不需要原生样例：跳过逐关求解采样（大关首次生成可省几分钟）
         var fewShot = composer is { WantsFewShot: false }
             ? []
@@ -58,11 +75,6 @@ public sealed class GenerationPipeline
             facade.Registration, targetBand,
             request.LevelNumber, mechanicsNote, request.SpecialRequirements,
             fewShot, composer?.CompositionSpec);
-        // 每次生成一个随机种子，并混入编号/特殊要求的稳定哈希：保证"重新生成/换提示词"能得到不同候选。
-        // 种子派生放在流水线（通用层），composer 只消费 Seed——不必每个玩法自己实现提示词哈希。
-        var composeContext = new ComposeContext(
-            request.LevelNumber, targetBand, request.SpecialRequirements,
-            Random.Shared.Next() ^ StableHash(request.LevelNumber ?? "") ^ StableHash(request.SpecialRequirements ?? ""));
 
         var runId = _store.InsertRun(request.GameId, targetBand,
             request.LevelNumber, request.SpecialRequirements, limit, timeoutMs, PromptBuilder.PromptVersion);
@@ -200,12 +212,24 @@ public sealed class GenerationPipeline
             }
             // 每次调用换一次随机增量：同一尝试内的修复轮/候选也不要产出完全相同的图
             var attemptContext = composeContext with { Seed = composeContext.Seed ^ Random.Shared.Next() };
-            (formatErrors, content) = ValidateCandidate(facade, composer, chat.Content, levelNumber, attemptContext);
+            (formatErrors, content, var composeKind) =
+                ValidateCandidate(facade, composer, chat.Content, levelNumber, attemptContext);
             if (formatErrors.Count == 0)
             {
                 progress?.Invoke(new GenerationProgress("llm",
                     $"第 {attempt} 次出题通过格式校验（{chat.LatencyMs}ms，{calls} 次调用）", attempt));
                 break;
+            }
+            // 约束冲突（几何/需求不可满足）：模型改不了几何，修复重试没有意义，直接记 constraint_violation
+            if (composeKind == ComposeFailureKind.Constraint)
+            {
+                var constraintDetail = $"设计约束未通过：{string.Join("；", formatErrors.Take(3))}";
+                var rejected = new CandidateAttempt(attempt, null, FailureClass.ConstraintViolation,
+                    constraintDetail, null, null, null, null, calls, sw.ElapsedMilliseconds);
+                var rejectedId = PersistCandidate(runId, rejected);
+                progress?.Invoke(new GenerationProgress("constraint", constraintDetail, attempt,
+                    FailureClass.ConstraintViolation));
+                return new AttemptOutcome(rejected, Passed: false, RunEnded: false, rejectedId);
             }
             progress?.Invoke(new GenerationProgress("llm",
                 $"格式未通过：{formatErrors[0]}", attempt, FailureClass.FormatInvalid));
@@ -339,26 +363,27 @@ public sealed class GenerationPipeline
     // 候选校验：玩法声明坐标制时，先从"设计意图"拼装出原生关卡，再过一次原生校验器
     // 双重校验的意义：拼装器自身也可能有 bug，原生校验是最后一道闸（不因中间层存在就跳过）
     // 返回 (错误清单, 可用的原生关卡 JSON)；错误为空时 Content 必非空
-    private static (List<string> Errors, string? Content) ValidateCandidate(
+    private static (List<string> Errors, string? Content, ComposeFailureKind? Kind) ValidateCandidate(
         IGameFacade facade, ILevelComposer? composer, string? modelOutput, string? levelNumber,
         ComposeContext composeContext)
     {
         var extracted = LlmJson.ExtractJson(modelOutput ?? "");
         if (extracted is null)
         {
-            return (["输出中未找到 JSON 对象（请只输出一个 JSON 对象，不要解释文字）"], null);
+            return (["输出中未找到 JSON 对象（请只输出一个 JSON 对象，不要解释文字）"], null,
+                ComposeFailureKind.Format);
         }
         if (composer is null)
         {
-            return (facade.FormatErrors(extracted).ToList(), extracted);
+            return (facade.FormatErrors(extracted).ToList(), extracted, ComposeFailureKind.Format);
         }
         var composed = composer.Compose(extracted, levelNumber, composeContext);
         if (composed.LevelJson is null)
         {
-            return (composed.Errors.ToList(), null);
+            return (composed.Errors.ToList(), null, composed.Kind);
         }
         var errors = facade.FormatErrors(composed.LevelJson).ToList();
-        return (errors, errors.Count == 0 ? composed.LevelJson : null);
+        return (errors, errors.Count == 0 ? composed.LevelJson : null, ComposeFailureKind.Format);
     }
 
     // 落一条候选

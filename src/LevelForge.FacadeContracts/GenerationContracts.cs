@@ -31,6 +31,11 @@ public interface ILevelComposer
     ComposeResult Compose(string modelOutput, string? levelNumber, ComposeContext context) =>
         Compose(modelOutput, levelNumber);
 
+    // 生成前的参数可行性检查（可选）：例如"2 档模板最多 24 只猪，无法满足 ≥30 只"。
+    // 返回非空 = 这个请求在调用 LLM 之前就不可满足，流水线直接失败并给出可操作原因，
+    // 不再把"几何约束"当成"格式不合法"反复回喂模型。
+    IReadOnlyList<string> ValidateContext(ComposeContext context) => [];
+
     // few-shot 示例转坐标制：示例必须与要求的输出格式一致，否则模型会照着示例写原生 grid
     // 无法转换返回 null（调用方跳过该示例）
     string? DescribeAsCoordinates(string levelJson);
@@ -43,9 +48,14 @@ public sealed record ComposeContext(
     string? SpecialRequirements,
     int Seed);
 
-// 拼装结论：LevelJson 非空即成功（此时 Errors 为空）；失败时 Errors 逐条可回喂模型
+// 拼装失败类型：Format=模型输出格式问题（可用修复重试回喂）；Constraint=几何/需求不可满足（模型改不了，别重试）
+public enum ComposeFailureKind { Format, Constraint }
+
+// 拼装结论：LevelJson 非空即成功（此时 Errors 为空）；失败时 Errors 逐条说明原因
 public sealed record ComposeResult(string? LevelJson, IReadOnlyList<string> Errors)
 {
+    public ComposeFailureKind Kind { get; init; } = ComposeFailureKind.Format;
+
     // 成功：得到可直接走原生格式校验的关卡 JSON
     public static ComposeResult Ok(string levelJson) => new(levelJson, []);
 
@@ -54,6 +64,13 @@ public sealed record ComposeResult(string? LevelJson, IReadOnlyList<string> Erro
 
     // 失败：错误清单由调用方组装好传入
     public static ComposeResult Fail(IReadOnlyList<string> errors) => new(null, errors);
+
+    // 约束失败：需求/几何不可满足，重试模型没有意义（流水线直接记 constraint_violation）
+    public static ComposeResult Reject(params string[] errors) =>
+        new(null, errors) { Kind = ComposeFailureKind.Constraint };
+
+    public static ComposeResult Reject(IReadOnlyList<string> errors) =>
+        new(null, errors) { Kind = ComposeFailureKind.Constraint };
 }
 
 // 生成质量门（可选能力）：格式合法 ≠ 设计可用。适配层可声明"这种布局不算有效关卡"，
