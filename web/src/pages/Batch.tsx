@@ -23,6 +23,7 @@ import {
   validateBatchForm,
   type BatchForm,
 } from '../state/batch'
+import { useToastFor } from '../state/useToastFor'
 
 const POLL_MS = 1500
 
@@ -42,6 +43,7 @@ export function Batch({ game }: { game: GameSummary }) {
   const [status, setStatus] = useState<BatchStatus | null>(null)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  useToastFor(message, error)
   const [busy, setBusy] = useState(false)
   const [overwrite, setOverwrite] = useState(false)
   const timerRef = useRef<number | null>(null)

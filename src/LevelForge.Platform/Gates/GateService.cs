@@ -193,8 +193,11 @@ public sealed class GateService
         foreach (var level in _games.ListLevels(gameId))
         {
             // 每关都是一次真实求解：落运行记录（审计 + 校准数据底座）
+            // 门3是全量逐关扫描：单关限时 8s，避免硬关长尾把一次门3拖到十几分钟；
+            // 预算耗尽如实记为 resource_limit（未知），不冒充无解
             var bytes = Encoding.UTF8.GetBytes(level.ContentJson);
-            var solve = facade.Solve(new SolveCommand(level.ContentJson, bytes, level.LevelId));
+            var solve = facade.Solve(new SolveCommand(level.ContentJson, bytes, level.LevelId,
+                TimeSpan.FromSeconds(8)));
             var runId = _runs.Insert(reg, level.LevelId, LevelHashOf(bytes), solve);
             if (solve.Tape is not null)
             {

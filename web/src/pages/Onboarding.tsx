@@ -44,6 +44,7 @@ import { ImportPanel } from '../components/ImportPanel'
 import { AdapterSemantics } from '../components/AdapterSemantics'
 import { gate1Checks } from '../state/gate1'
 import { buildRequirementPackage } from '../state/requirementPackage'
+import { useToastFor } from '../state/useToastFor'
 
 export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: {
   game: GameSummary
@@ -54,6 +55,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   const [tasks, setTasks] = useState<OnboardingTask[]>([])
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  useToastFor(message, error)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
 
@@ -107,6 +109,8 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
 
   // ⑥门3
   const [gate3, setGate3] = useState<Awaited<ReturnType<typeof runGate3>> | null>(null)
+  const [gate3Running, setGate3Running] = useState(false)
+  const [gate3Elapsed, setGate3Elapsed] = useState(0)
 
   const refresh = useCallback(async () => {
     try {
@@ -417,16 +421,26 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   }
 
   const submitGate2 = async () => {
-    await markStep(5, 'done', gate2Note.trim() || (game.gate2Applicable ? '门2已运行，见验证记录' : '门2不适用，走人工降级路径'))
+    const ok = await markStep(5, 'done', gate2Note.trim() || (game.gate2Applicable ? '门2已运行，见验证记录' : '门2不适用，走人工降级路径'))
+    if (ok) setMessage('已确认门2分诊并完成⑤')
   }
 
   const submitGate3 = async () => {
+    if (gate3Running) return
     setError('')
+    setGate3Running(true)
+    setGate3Elapsed(0)
+    setMessage(`门3运行中：正在逐关求解 ${game.levelCount} 关，请等待…`)
+    const timer = window.setInterval(() => setGate3Elapsed((s) => s + 1), 1000)
     try {
       const result = await runGate3(game.gameId)
       setGate3(result)
+      setMessage(`门3完成：共 ${result.total} 关（红 ${result.red} / 黄 ${result.yellow} / 新 ${result.newLevels} / 一致 ${result.matched}）`)
     } catch (e) {
       setError((e as Error).message)
+    } finally {
+      window.clearInterval(timer)
+      setGate3Running(false)
     }
   }
 
@@ -435,6 +449,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     try {
       await setGameStatus(game.gameId, status)
       await markStep(6, 'done', `状态变更为 ${status}`)
+      setMessage(status === 'production' ? '已转正上线（production）' : '已上线试用档（trial）')
       onStatusChanged()
     } catch (e) {
       setError((e as Error).message)
@@ -1130,7 +1145,9 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
           ) : (
           <>
           <div className="ob-form-row">
-            <button onClick={() => void submitGate3()}>运行门3（基准 diff）</button>
+            <button onClick={() => void submitGate3()} disabled={gate3Running}>
+              {gate3Running ? `门3运行中…（${gate3Elapsed}s）` : '运行门3（基准 diff）'}
+            </button>
             {game.status !== 'trial' && game.status !== 'production' && (
               <button onClick={() => void promote('trial')}>先上试用档（trial，带"未经对拍"水印）</button>
             )}
@@ -1145,6 +1162,12 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
               </button>
             )}
           </div>
+          {gate3Running && (
+            <div className="ob-note">
+              门3 正在逐关求解全部 {game.levelCount} 关（首次运行没有基准，结果会进入「待确认」集合）；
+              耗时可能几分钟，完成后在下方显示四区结果，请不要关闭页面。
+            </div>
+          )}
           {gate3Zones?.blocked && (
             <div className="failure-advice">
               存在 {gate3Zones.red.length} 个红灯关（{gate3Zones.red.slice(0, 6).join('、')}

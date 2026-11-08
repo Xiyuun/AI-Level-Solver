@@ -535,3 +535,22 @@ button:disabled { opacity: 0.5; cursor: default; }
 .batch-detail { font-size: 13px; }
 .batch-detail summary { cursor: pointer; color: var(--text-3); }
 .batch-detail table { margin-top: var(--space-2); }
+
+/* 全局操作反馈：右下角 toast（页面顶部的 message/error 在长页面上不可见） */
+.toast-host {
+  position: fixed; right: 18px; bottom: 18px; z-index: 1000;
+  display: flex; flex-direction: column; gap: 8px; max-width: 420px;
+}
+.toast {
+  padding: 8px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.5;
+  color: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, .18); word-break: break-word;
+  animation: toast-in .18s ease-out;
+}
+.toast-ok { background: #2f855a; }
+.toast-error { background: #c0392b; }
+.toast-info { background: #4a5568; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* 所有按钮的即时按压反馈：即使异步操作尚未返回，也能看出"点到了" */
+button:not(:disabled):active { transform: translateY(1px); filter: brightness(.94); }
+button:disabled { opacity: .55; cursor: not-allowed; }

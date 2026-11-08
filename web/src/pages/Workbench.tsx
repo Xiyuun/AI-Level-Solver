@@ -22,6 +22,7 @@ import { MetricsBar } from '../components/MetricsBar'
 import { PhrasePicker } from '../components/PhrasePicker'
 import { PipelineLog } from '../components/PipelineLog'
 import { PreviewPane } from '../components/PreviewPane'
+import { useToastFor } from '../state/useToastFor'
 import {
   logEntriesFromEvents,
   logEntriesFromRun,
@@ -69,6 +70,7 @@ export function Workbench({ game, detail, onOpenOnboarding }: {
   const [qcTape, setQcTape] = useState<SolutionTapeMirror | null>(null)
   const [qcJson, setQcJson] = useState('')
   const [message, setMessage] = useState('')
+  useToastFor(message)
   const [adoptTarget, setAdoptTarget] = useState<AdoptTarget | null>(null)
   const [adoptedLevelId, setAdoptedLevelId] = useState<string | null>(null)
   const [confirmRefresh, setConfirmRefresh] = useState(0)

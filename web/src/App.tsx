@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { activateGame, getGame, getSettings, listGames, type GameDetail, type GameSummary } from './api/client'
 import { ImportProjectDialog } from './components/ImportProjectDialog'
+import { ToastHost } from './components/ToastHost'
 import { Batch } from './pages/Batch'
 import { Onboarding } from './pages/Onboarding'
 import { Settings } from './pages/Settings'
@@ -151,6 +152,7 @@ export function App() {
         ) : (
           !error && <div className="empty big-empty">加载玩法详情…</div>
         )}
+        <ToastHost />
       </div>
     </ThemeContext.Provider>
   )

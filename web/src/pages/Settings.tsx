@@ -10,6 +10,7 @@ import {
 import { PhrasePicker } from '../components/PhrasePicker'
 import { applyTheme, resolveTheme } from '../state/theme'
 import { LLM_PRESETS, normalizeBaseUrl } from '../state/llmPresets'
+import { useToastFor } from '../state/useToastFor'
 
 export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: () => void; onThemeChanged: () => void }) {
   const [baseUrl, setBaseUrl] = useState('')
@@ -25,6 +26,7 @@ export function Settings({ onGamesChanged, onThemeChanged }: { onGamesChanged: (
   const [games, setGames] = useState<GameSummary[]>([])
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  useToastFor(message, error)
 
   const load = async () => {
     try {
