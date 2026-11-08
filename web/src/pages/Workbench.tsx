@@ -161,6 +161,7 @@ export function Workbench({ game, detail, onOpenOnboarding }: {
       setElapsedMs(0)
       setRun(null)
       setTape(null)
+      setAdoptedLevelId(null)   // 新一次生成：上一关的执行确认卡不再显示（否则会占满预览区）
       const startedAt = Date.now()
       // 本地计时器：SSE 事件间隔可能很长，至少让"已用时"持续跳动
       timerRef.current = window.setInterval(() => setElapsedMs(Date.now() - startedAt), 200)
@@ -223,6 +224,7 @@ export function Workbench({ game, detail, onOpenOnboarding }: {
     setPhase('idle')
     setRun(null)
     setTape(null)
+    setAdoptedLevelId(null)
     setLiveEvents([])
     setElapsedMs(0)
     setAutoRetried(false)
@@ -509,7 +511,9 @@ export function Workbench({ game, detail, onOpenOnboarding }: {
               ) : (
                 <div className="empty">该候选无内容（API 失败）</div>
               )}
-              <ConfirmationCard gameId={game.gameId} levelId={adoptedLevelId} refreshKey={confirmRefresh} />
+              {adoptedLevelId && (
+                <ConfirmationCard gameId={game.gameId} levelId={adoptedLevelId} refreshKey={confirmRefresh} />
+              )}
             </>
           )}
 
@@ -560,7 +564,9 @@ export function Workbench({ game, detail, onOpenOnboarding }: {
                 </button>
                 <button onClick={() => download(qcJson, qcResult ? (JSON.parse(qcJson) as { id?: string }).id ?? null : null)}>下载 JSON</button>
               </div>
-              <ConfirmationCard gameId={game.gameId} levelId={adoptedLevelId} refreshKey={confirmRefresh} />
+              {adoptedLevelId && (
+                <ConfirmationCard gameId={game.gameId} levelId={adoptedLevelId} refreshKey={confirmRefresh} />
+              )}
             </>
           )}
         </div>

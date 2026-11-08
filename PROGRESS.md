@@ -402,3 +402,15 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
 - **根因**：`.gen-panel` 是 `.wb-right`（`align-items:center` 的列 flex）的子项，面板内只有 `position:absolute` 的进度层、没有参与布局的内容 → 宽度塌成 0；绝对定位层 `inset:0` 只有 0 宽，中文逐字换行、240px 进度条溢出。
 - **修复**：`.gen-panel` 显式 `width:100%; max-width:760px`（与其它结果卡一致）；进度层加左右 padding；标题/副标题 `text-align:center`；进度条 `max-width:100%`。
 - 纯 CSS，不需要后端重启；前端重新构建后 Ctrl+F5 生效。
+
+### 10.21 生成结果页执行确认卡挤掉解法预览（2026-11-08）
+
+用户截图：生成成功后右侧出现巨大的“游戏执行确认”列表，盖住棋盘/回放，看不到解法。
+
+- **根因**：`ConfirmationCard` 在**采纳前**也渲染，`levelId=adoptedLevelId` 为 null → 列出该玩法**全部**确认记录（截图里几十条旧记录，全是“文件缺失”）；卡片把 `.preview-pane`（`flex:1; min-height:0`）挤到 0 高，棋盘溢出后被后绘制的卡片覆盖。
+- **修复**：
+  1. 工作台只在 `adoptedLevelId` 非空时渲染确认卡（生成中/未采纳不显示）；
+  2. `ConfirmationCard` 无 levelId 直接返回 null，且只查询该关记录（不再兜底列全部）；
+  3. 新生成/回到空态时重置 `adoptedLevelId`，避免上一关的卡片残留；
+  4. 卡片 `max-height:320px; overflow-y:auto`，预览区 `min-height:360px`——即使确认记录多也不会挤掉棋盘。
+- 前端 95 测试通过；产物重建，Ctrl+F5 生效。

@@ -182,7 +182,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .chip-difficulty { color: var(--warn); }
 
 /* ---- 预览区 ---- */
-.preview-pane { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); width: 100%; flex: 1; min-height: 0; }
+.preview-pane { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); width: 100%; flex: 1; min-height: 360px; }
 .preview-toolbar { display: flex; align-items: center; gap: 14px; }
 .mode-switch { display: flex; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; }
 .mode-switch button { border: none; border-radius: 0; }
@@ -259,7 +259,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .gen-progress-sub { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
 
 /* ---- 执行确认卡 ---- */
-.confirmation-card { width: 100%; max-width: 760px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.confirmation-card { width: 100%; max-width: 760px; max-height: 320px; overflow-y: auto; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
 .confirmation-card h4 { margin: 0 0 10px; font-size: 14px; }
 .confirmation-row { display: flex; gap: 10px; align-items: center; font-size: 13px; padding: 6px 0; border-bottom: 1px dashed var(--border-soft); flex-wrap: wrap; }
 .state-chip { padding: 1px 10px; border-radius: 10px; font-size: 12px; }

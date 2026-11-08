@@ -10,9 +10,13 @@ export function ConfirmationCard({ gameId, levelId, refreshKey }: { gameId: stri
   const [note, setNote] = useState('')
 
   const refresh = useCallback(async () => {
+    if (!levelId) {
+      setItems([])
+      return
+    }
     try {
       const all = await listConfirmations(gameId)
-      setItems(levelId ? all.filter((c) => c.levelId === levelId) : all)
+      setItems(all.filter((c) => c.levelId === levelId))
     } catch (e) {
       setError((e as Error).message)
     }
@@ -21,6 +25,8 @@ export function ConfirmationCard({ gameId, levelId, refreshKey }: { gameId: stri
   useEffect(() => {
     void refresh()
   }, [refresh, refreshKey])
+
+  if (!levelId) return null
 
   const act = async (action: () => Promise<unknown>) => {
     setError('')
