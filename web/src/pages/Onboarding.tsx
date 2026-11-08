@@ -33,7 +33,7 @@ import {
   checklistComplete,
   checklistProgress,
   groupGate3,
-  parseChecklistDetail,
+  initChecklistFromTasks,
   seedChecklistFromAnalysis,
   stepTitle,
   type ChecklistItem,
@@ -99,6 +99,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   const [items, setItems] = useState<ChecklistItem[]>([])
   const [states, setStates] = useState<ChecklistStateEntry[]>([])
   const [newItemText, setNewItemText] = useState('')
+  const [checklistTip, setChecklistTip] = useState('')
   const [initialized, setInitialized] = useState(false)
 
   // ⑤门2
@@ -125,23 +126,15 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     setChosenCodeRoot(detail.codeRoot || profile?.codeDirCandidates?.[0]?.directory || '')
   }, [detail.gameId, detail.levelsRoot, detail.codeRoot, profile])
 
-  // ④清单初始化：已持久化的用持久化值（兼容旧格式）；否则按 深度分析初稿 > 画像派生 > 纯模板 优先级生成
+  // ④清单初始化：任务未加载时不播种（否则空 tasks 会把已存档的 states 冲成 pending）；加载完成后再读存档
   useEffect(() => {
     if (initialized) return
-    const step4 = tasks.find((t) => t.step === 4)
-    const loaded = parseChecklistDetail(step4?.detail, step4?.status ?? 'todo')
-    if (loaded) {
-      setItems(loaded.items)
-      setStates(loaded.states)
-      setInitialized(true)
-      return
-    }
-    if (detail.projectProfile !== undefined) {   // 详情已加载（null=内置玩法）
-      const seeded = seedChecklistFromAnalysis(profile, detail.projectAnalysis)
-      setItems(seeded)
-      setStates(seeded.map((i) => ({ index: i.index, state: 'pending' as ChecklistState })))
-      setInitialized(true)
-    }
+    if (detail.projectProfile === undefined) return   // 详情未加载（内置玩法为 null，也算加载完成）
+    const init = initChecklistFromTasks(tasks, profile, detail.projectAnalysis)
+    if (!init) return
+    setItems(init.items)
+    setStates(init.states)
+    setInitialized(true)
   }, [tasks, profile, detail.projectProfile, detail.projectAnalysis, initialized])
 
   // ②报告文本框回填：优先已存档报告（刷新/重进不丢），否则分析初稿自动填入（路径 A 初稿语义）
@@ -164,8 +157,10 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
     try {
       await updateOnboardingStep(game.gameId, step, status, detailText)
       await refresh()
+      return true
     } catch (e) {
       setError((e as Error).message)
+      return false
     }
   }
 
@@ -355,12 +350,13 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       states: statesOverride ?? states,
       updatedAt: new Date().toISOString(),
     })
-    await markStep(4, status, payload)
+    return markStep(4, status, payload)
   }
 
   // 三态切换：待确认 → 已确认 / 不适用（不适用必须带理由）；变更即落库，刷新不丢
   // 注意：副作用（保存）放在 setStates 之外——StrictMode 会双调用 updater，写在里面会重复写库
   const setItemState = (index: number, next: ChecklistState, reason?: string) => {
+    setChecklistTip('')
     const merged: ChecklistStateEntry[] = [
       ...states.filter((s) => s.index !== index),
       { index, state: next, reason: next === 'na' ? (reason ?? '') : undefined },
@@ -370,6 +366,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   }
 
   const setNaReason = (index: number, reason: string) => {
+    setChecklistTip('')
     const merged = states.map((s) => (s.index === index ? { ...s, reason } : s))
     setStates(merged)
     void persistChecklist(statusOf(4) === 'done' ? 'done' : 'todo', items, merged)
@@ -381,12 +378,26 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
       setError(`还有 ${progress.pending} 条待确认；不适用的条目必须填写理由，不能留空`)
       return
     }
-    await persistChecklist('done')
+    const saved = await persistChecklist('done')
+    if (saved) {
+      // 完成按钮在页面底部、步骤状态在页首——成功反馈必须就近显示，否则观感是"点了没反应"
+      setChecklistTip(`✓ 已保存：④已完成（已确认 ${progress.confirmed} / 不适用 ${progress.na}）`)
+    }
+  }
+
+  const saveChecklistDraft = async () => {
+    setError('')
+    setChecklistTip('')
+    const saved = await persistChecklist('todo')
+    if (saved) {
+      setChecklistTip('✓ 清单与每条状态已保存（④未完成）')
+    }
   }
 
   const addChecklistItem = () => {
     const text = newItemText.trim()
     if (!text) return
+    setChecklistTip('')
     const maxIndex = items.reduce((m, i) => Math.max(m, i.index), 0)
     const next = [...items, { group: 'A' as const, index: maxIndex + 1, text, kind: 'confirm' as const }]
     const nextStates = [...states, { index: maxIndex + 1, state: 'pending' as const }]
@@ -397,6 +408,7 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
   }
 
   const removeChecklistItem = (index: number) => {
+    setChecklistTip('')
     const next = items.filter((i) => i.index !== index)
     const nextStates = states.filter((s) => s.index !== index)
     setItems(next)
@@ -1074,12 +1086,15 @@ export function Onboarding({ game, detail, onStatusChanged, onProjectDeleted }: 
               保存并完成④（已确认 {checklistStat.confirmed} / 不适用 {checklistStat.na} / 待确认 {checklistStat.pending}）
             </button>
             <button
-              onClick={() => void persistChecklist('todo')}
+              onClick={() => void saveChecklistDraft()}
               title="清单与每条状态保存在该玩法的向导存档里，下次进入还在"
             >
               仅保存清单（不完成）
             </button>
           </div>
+          {checklistTip && (
+            <div className="ok-inline" style={{ marginTop: 6, fontSize: 12.5 }}>{checklistTip}</div>
+          )}
           </>
           )}
         </section>

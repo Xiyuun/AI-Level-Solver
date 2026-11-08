@@ -7,6 +7,7 @@ import {
   checklistComplete,
   checklistProgress,
   groupGate3,
+  initChecklistFromTasks,
   parseChecklistDetail,
   seedChecklist,
   type ChecklistStateEntry,
@@ -130,6 +131,35 @@ describe('按项目画像生成清单初稿', () => {
     expect(customs.some((i) => i.text.includes('levelId,grid'))).toBe(true)
     expect(customs.some((i) => i.text.includes('Cocos'))).toBe(true)
     expect(customs.every((i) => i.index >= 100)).toBe(true)
+  })
+})
+
+describe('④初始化（任务加载时序）', () => {
+  it('任务未加载时返回 null，禁止用空 tasks 先播种', () => {
+    expect(initChecklistFromTasks([], null, null)).toBeNull()
+  })
+
+  it('任务已加载且④有存档：直接恢复已确认状态（不会被冲成 pending）', () => {
+    const detail = JSON.stringify({
+      items: REVIEW_CHECKLIST.slice(0, 2),
+      states: [
+        { index: 1, state: 'confirmed' },
+        { index: 2, state: 'na', reason: 'v1 不涉及' },
+      ],
+    })
+    const tasks = [
+      { step: 4, title: '④', status: 'done', detail, updatedAt: '' },
+    ] as OnboardingTask[]
+    const init = initChecklistFromTasks(tasks, null, null)!
+    expect(init.states.every((s) => s.state !== 'pending')).toBe(true)
+    expect(init.states[1]).toEqual({ index: 2, state: 'na', reason: 'v1 不涉及' })
+  })
+
+  it('任务已加载且无存档：按画像/分析播种为待确认', () => {
+    const tasks = [{ step: 4, title: '④', status: 'todo', detail: null, updatedAt: '' }] as OnboardingTask[]
+    const init = initChecklistFromTasks(tasks, null, null)!
+    expect(init.items.length).toBe(REVIEW_CHECKLIST.length)
+    expect(init.states.every((s) => s.state === 'pending')).toBe(true)
   })
 })
 

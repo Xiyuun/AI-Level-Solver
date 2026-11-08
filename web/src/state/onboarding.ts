@@ -174,6 +174,20 @@ export function parseChecklistDetail(
   }
 }
 
+// ④初始化：任务未加载时返回 null（禁止用空 tasks 先播种，否则已存档的 states 会被 pending 冲掉）
+export function initChecklistFromTasks(
+  tasks: OnboardingTask[],
+  profile: ProjectProfile | null,
+  analysis: ProjectAnalysis | null,
+): { items: ChecklistItem[]; states: ChecklistStateEntry[] } | null {
+  if (tasks.length === 0) return null
+  const step4 = tasks.find((t) => t.step === 4)
+  const loaded = parseChecklistDetail(step4?.detail, step4?.status ?? 'todo')
+  if (loaded) return loaded
+  const seeded = seedChecklistFromAnalysis(profile, analysis)
+  return { items: seeded, states: seeded.map((i) => ({ index: i.index, state: 'pending' as ChecklistState })) }
+}
+
 // 清单是否完成：每条都必须有终态；「不适用」必须写理由（否则等于没核对）
 export function checklistComplete(states: ChecklistStateEntry[], items: ChecklistItem[]): boolean {
   if (items.length === 0) return false
