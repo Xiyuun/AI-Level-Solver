@@ -175,8 +175,10 @@ public sealed class GenerationPipeline
                 call == 0
                     ? $"第 {attempt} 次出题（候选 #{attempt}，模型调用中）"
                     : $"第 {attempt} 次出题 · 格式修复重试 {call}/{MaxRepairs}（降温度重发）", attempt));
+            // 关闭思考：思考与正文共用 max_tokens，长 JSON 任务里思考会吃光预算导致正文为空
+            // （实测格式失败的一大来源；LlmClient 对不认该字段的网关会自动去掉重发）
             var chat = await _llm.ChatAsync(config, messages, temperature, maxTokens,
-                jsonMode: true, ct: ct);
+                jsonMode: true, ct: ct, disableThinking: true);
             calls++;
             if (!chat.Ok)
             {
@@ -202,6 +204,21 @@ public sealed class GenerationPipeline
                 // 修复重试：回喂 assistant 原文 + 校验错误（§3.2）
                 messages.Add(new ChatMessage("assistant", chat.Content));
                 messages.Add(PromptBuilder.RepairMessage(formatErrors));
+            }
+        }
+
+        // 格式通过后再过玩法声明的质量门：可解但无设计（如全部同朝向/规则网格）不进求解与难度评估
+        if (formatErrors.Count == 0 && content is not null && facade is ILevelQualityGate qualityGate)
+        {
+            var quality = qualityGate.QualityErrors(content);
+            if (quality.Count > 0)
+            {
+                var qualityDetail = $"设计质量未通过：{string.Join("；", quality.Take(3))}";
+                var rejected = new CandidateAttempt(attempt, content, FailureClass.ConstraintViolation,
+                    qualityDetail, null, null, null, null, calls, sw.ElapsedMilliseconds);
+                var id = PersistCandidate(runId, rejected);
+                progress?.Invoke(new GenerationProgress("constraint", qualityDetail, attempt, FailureClass.ConstraintViolation));
+                return new AttemptOutcome(rejected, Passed: false, RunEnded: false, id);
             }
         }
 
@@ -304,7 +321,9 @@ public sealed class GenerationPipeline
             .Where(s => s is not null)
             .Select(s => s!)
             .ToList();
-        return converted.Count > 0 ? converted : native;
+        // 坐标制没有可用示例就"不给示例"，绝不回退原生格式：原生 95 猪 JSON 会撑爆上下文、
+        // 并让模型照抄原生几何（与 CompositionSpec 要求的输出格式冲突）
+        return converted;
     }
 
     // 候选校验：玩法声明坐标制时，先从"设计意图"拼装出原生关卡，再过一次原生校验器

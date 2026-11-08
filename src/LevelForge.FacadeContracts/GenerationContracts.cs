@@ -39,3 +39,12 @@ public sealed record ComposeResult(string? LevelJson, IReadOnlyList<string> Erro
     // 失败：错误清单由调用方组装好传入
     public static ComposeResult Fail(IReadOnlyList<string> errors) => new(null, errors);
 }
+
+// 生成质量门（可选能力）：格式合法 ≠ 设计可用。适配层可声明"这种布局不算有效关卡"，
+// 生成流水线在求解前拦截，并把错误回喂模型重生——避免"28 只猪全部朝右"这种可解但无设计的图。
+// 只作用于生成候选；导入的原生关卡不经过本门（导入只走 FormatErrors）。
+public interface ILevelQualityGate
+{
+    // 返回空 = 通过；非空 = 逐条可回喂的设计问题（不要在这里做求解，保持轻量）
+    IReadOnlyList<string> QualityErrors(string levelJson);
+}
