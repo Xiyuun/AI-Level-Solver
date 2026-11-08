@@ -451,3 +451,16 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
 - 实测：连续两次 2 档（特殊要求不同/编号不同）得到不同布局（首批猪坐标、levelId、朝向集合均不同）；插件 hash `657c7289…`，门1 过。
 - 测试：适配层 **23**（+2：不同种子不同布局、特殊要求猪数），平台 **301**，前端 95。
 - 诚实边界：变体仍来自同一 6 猪模块库，设计密度有限；真正的"独立设计"要等工具级 composer SDK/真实关变异器（见 `工具通用优化方案.md`）。
+
+### 10.24 生成种子/样例策略下沉到通用层（2026-11-08）
+
+用户追问：上一轮的修复是否只是 PiggyFarm 专属？——其中"上下文/种子"本应通用，已把剩余部分下沉：
+
+- `ILevelComposer.Compose(modelOutput, levelNumber, ComposeContext)`：通用重载，旧 composer 默认回退两参；
+- `ComposeContext(TargetBand, SpecialRequirements, Seed)`：目标档/特殊要求/种子由平台注入；
+- **种子派生在流水线**：`Random ^ StableHash(编号) ^ StableHash(特殊要求)`，换提示词/重新生成都会换种子，composer 只消费 `Seed`（PiggyFarm 不再自己哈希提示词）；
+- **`ILevelComposer.WantsFewShot`（默认 true）**：模板/坐标制 composer 声明 false，流水线跳过 `FewShotSelector.Sample`。
+  - 这修了一个通用性能缺陷：首次生成前会逐关求解全部存量关来选 few-shot；PiggyFarm 33 关（14 个硬关）导致**生成前白等约 200 秒**。
+  - 实测修复后：请求到完成 **1.6 秒**（此前 elapsed 202 秒但真正生成只 1.3 秒）。
+- 仍留在适配层的专属内容：6 猪模块库、6 个槽位、质量门规则（朝向/受阻/初始可走）、猪数要求解析、难度阈值——这些属于游戏知识，等 composer SDK/真实关变异器再抽象。
+- 测试：平台 301、适配层 23、前端 95。

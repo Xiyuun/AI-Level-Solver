@@ -20,6 +20,10 @@ public interface ILevelComposer
 {
     string CompositionSpec { get; }                                  // 追加到系统提示词的"输出什么"说明
 
+    // 是否需要原生 few-shot 样例：模板/坐标制 composer 往往不需要（而且采样要逐关求解，代价很高）。
+    // 默认 true 保持旧行为；返回 false 时流水线跳过 FewShotSelector.Sample，避免生成前白等几分钟。
+    bool WantsFewShot => true;
+
     ComposeResult Compose(string modelOutput, string? levelNumber);  // 拼装原生关卡 JSON；失败返回错误清单
 
     // 带上下文的重载（默认回退到两参版本，旧 composer 不用改）：

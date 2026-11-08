@@ -50,15 +50,19 @@ public sealed class GenerationPipeline
         var composer = facade as ILevelComposer;
         var maxTokens = facade is ITokenBudgetHint hint ? hint.EstimateLevelTokens(request.LevelNumber) : 8192;
         var mechanicsNote = PromptBuilder.MechanicsNoteFor(facade.Registration.MechanicsJson, request.LevelNumber);
-        var fewShot = ConvertExamples(composer, _fewShot.Sample(facade, targetBand));
+        // 模板/坐标制 composer 不需要原生样例：跳过逐关求解采样（大关首次生成可省几分钟）
+        var fewShot = composer is { WantsFewShot: false }
+            ? []
+            : ConvertExamples(composer, _fewShot.Sample(facade, targetBand));
         var baseMessages = PromptBuilder.Build(
             facade.Registration, targetBand,
             request.LevelNumber, mechanicsNote, request.SpecialRequirements,
             fewShot, composer?.CompositionSpec);
-        // 每次生成一个随机种子 + 特殊要求哈希：保证"重新生成/换提示词"能得到不同候选，
-        // 而不是 composer 每次返回同一张模板图
+        // 每次生成一个随机种子，并混入编号/特殊要求的稳定哈希：保证"重新生成/换提示词"能得到不同候选。
+        // 种子派生放在流水线（通用层），composer 只消费 Seed——不必每个玩法自己实现提示词哈希。
         var composeContext = new ComposeContext(
-            request.LevelNumber, targetBand, request.SpecialRequirements, Random.Shared.Next());
+            request.LevelNumber, targetBand, request.SpecialRequirements,
+            Random.Shared.Next() ^ StableHash(request.LevelNumber ?? "") ^ StableHash(request.SpecialRequirements ?? ""));
 
         var runId = _store.InsertRun(request.GameId, targetBand,
             request.LevelNumber, request.SpecialRequirements, limit, timeoutMs, PromptBuilder.PromptVersion);
@@ -194,8 +198,8 @@ public sealed class GenerationPipeline
                     $"LLM 调用失败：{chat.Error}", attempt, FailureClass.ApiError));
                 return new AttemptOutcome(apiAttempt, Passed: false, RunEnded: true, apiId);
             }
-            // 每次调用给一个新种子：同一尝试内的修复轮也不要产出完全相同的候选
-            var attemptContext = composeContext with { Seed = Random.Shared.Next() };
+            // 每次调用换一次随机增量：同一尝试内的修复轮/候选也不要产出完全相同的图
+            var attemptContext = composeContext with { Seed = composeContext.Seed ^ Random.Shared.Next() };
             (formatErrors, content) = ValidateCandidate(facade, composer, chat.Content, levelNumber, attemptContext);
             if (formatErrors.Count == 0)
             {
@@ -379,4 +383,19 @@ public sealed class GenerationPipeline
     }
 
     #endregion
+
+    // 稳定哈希（FNV-1a）：同一提示词得到同一贡献，不同提示词得到不同贡献；不依赖进程随机化的 string.GetHashCode
+    private static int StableHash(string text)
+    {
+        unchecked
+        {
+            var hash = 2166136261;
+            foreach (var ch in text)
+            {
+                hash ^= ch;
+                hash *= 16777619;
+            }
+            return (int)hash;
+        }
+    }
 }
