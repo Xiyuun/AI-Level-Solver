@@ -61,7 +61,7 @@ public sealed class OnboardingApiTests
     }
 
     [Fact]
-    public async Task 玩法状态变更_试用档与转正()
+    public async Task 玩法状态变更_试用档放行_转正需六步与门证据()
     {
         using var factory = new PlatformFactory();
         var client = factory.CreateClient();
@@ -73,9 +73,9 @@ public sealed class OnboardingApiTests
             await client.GetStringAsync("/api/games"), TestJson.Options)!;
         Assert.Equal("trial", games.Single(g => g.GameId == "sokoban-toy").Status);
 
-        // 转正（门2/门3 补验后）
+        // 转正：六步未完成（也没有门1/门3 的当前版本证据）→ 拒绝，而不是仅凭"最新门3不是 fail"放行
         var production = await PostAsync(client, "/api/games/sokoban-toy/status", new { status = "production" });
-        Assert.Equal(HttpStatusCode.OK, production.Status);
+        Assert.Equal(HttpStatusCode.Conflict, production.Status);
 
         // 非法状态被拒
         var bad = await PostAsync(client, "/api/games/sokoban-toy/status", new { status = "golden" });

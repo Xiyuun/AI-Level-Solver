@@ -44,10 +44,10 @@ public static class OnboardingEndpoints
         });
 
         // 玩法状态变更（分级接入 §5：试用档先行、转正档补验；上线注册/回退）
-        // 转正门禁（验证门 §5.3/§6）：最新一次门3 存在红灯时禁止转正——
-        // 红灯=结论发生了未解释的变化，此时上线等于把不确定性直接推给玩家
+        // 转正门禁（验证门 §5.3/§6）：六步全 done + 门1/门2/门3 证据齐全且与当前适配层指纹一致，
+        // 门3 最新一次无红灯。证据绑版本：适配层换过（hash 不符）就视为旧证据，必须重跑对应门。
         app.MapPost("/api/games/{gameId}/status", (string gameId, GameStatusRequestDto body,
-            OnboardingStore onboarding, VerificationRecordStore records) =>
+            OnboardingStore onboarding, VerificationRecordStore records, GameStore games) =>
         {
             if (body.Status is null ||
                 body.Status is not (GameStatus.Onboarding or GameStatus.Trial or GameStatus.Production))
@@ -56,13 +56,61 @@ public static class OnboardingEndpoints
             }
             if (body.Status == GameStatus.Production)
             {
-                var latestGate3 = records.List(gameId, "gate3").FirstOrDefault();
-                if (latestGate3 is { Verdict: "fail" })
+                var game = games.FindGame(gameId);
+                if (game is null)
+                {
+                    return Results.NotFound(new { message = $"未知玩法：{gameId}" });
+                }
+                var tasks = onboarding.List(gameId);
+                var missing = tasks.Where(t => t.Status != "done").Select(t => t.Step).ToList();
+                if (tasks.Count != 6 || missing.Count > 0)
+                {
+                    var detail = missing.Count == 0 ? "六步数据不完整" : string.Join("、", missing.Select(s => $"第{s}步"));
+                    return Results.Conflict(new { message = $"生产档要求六步全部 done；未完成：{detail}" });
+                }
+
+                var gate1 = records.List(gameId, "gate1").FirstOrDefault();
+                if (gate1 is null || gate1.Verdict != "pass")
+                {
+                    return Results.Conflict(new { message = "门1 未通过：生产档要求门1 五项零豁免全绿" });
+                }
+                if (!string.Equals(gate1.AdapterHash, game.AdapterHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Conflict(new { message = "门1 记录不是当前适配层（指纹不一致）：适配层换过，必须重跑门1" });
+                }
+
+                if (game.Gate2Applicable)
+                {
+                    var gate2 = records.List(gameId, "gate2").FirstOrDefault();
+                    if (gate2 is null)
+                    {
+                        return Results.Conflict(new { message = "门2 适用但尚无对拍记录：先跑门2，或登记门2不适用" });
+                    }
+                    if (gate2.Verdict == "fail")
+                    {
+                        return Results.Conflict(new { message = "门2 最新一次对拍未通过：先分诊修复（适配层/harness/关卡数据/游戏本体）" });
+                    }
+                    if (!string.Equals(gate2.AdapterHash, game.AdapterHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Results.Conflict(new { message = "门2 记录不是当前适配层（指纹不一致）：适配层换过，必须重跑门2" });
+                    }
+                }
+
+                var gate3 = records.List(gameId, "gate3").FirstOrDefault();
+                if (gate3 is null)
+                {
+                    return Results.Conflict(new { message = "尚未运行门3：生产档要求全量基准 diff，且最新一次无红灯" });
+                }
+                if (gate3.Verdict == "fail")
                 {
                     return Results.Conflict(new
                     {
                         message = "门3 最新一次全量回归存在红灯，禁止转正：先修复规则差异，或确认后更新基准再重跑门3",
                     });
+                }
+                if (!string.Equals(gate3.AdapterHash, game.AdapterHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Conflict(new { message = "门3 记录不是当前适配层（指纹不一致）：适配层换过，必须重跑门3" });
                 }
             }
             if (!onboarding.UpdateGameStatus(gameId, body.Status))

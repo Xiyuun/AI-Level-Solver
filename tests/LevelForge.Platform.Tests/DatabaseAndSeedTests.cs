@@ -65,6 +65,25 @@ public sealed class DatabaseAndSeedTests : IDisposable
     }
 
     [Fact]
+    public void 注册upsert_不覆盖用户登记的门2适用性()
+    {
+        var db = new AppDatabase(_dir);
+        db.Initialize();
+        GameSeeder.Seed(db, GameRegistry.Instance);
+        var store = new GameStore(db);
+
+        // 向导①登记为"门2适用"（与注册表的 false 相反，才能检出覆盖）
+        Assert.True(new OnboardingStore(db).UpdateGate2Driver("sokoban-toy", "{}", applicable: true));
+
+        // 插件重新注册时注册表给的是 false：用户登记必须保留
+        var registration = GameRegistry.Instance.Facades
+            .Single(f => f.Registration.GameId == "sokoban-toy").Registration;
+        GameSeeder.UpsertGame(db, registration);
+
+        Assert.True(store.FindGame("sokoban-toy")!.Gate2Applicable);
+    }
+
+    [Fact]
     public void 种子_注册玩具玩法与内置关()
     {
         var db = new AppDatabase(_dir);

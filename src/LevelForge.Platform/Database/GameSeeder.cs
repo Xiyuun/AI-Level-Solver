@@ -50,7 +50,11 @@ public static class GameSeeder
               -- （插件注册表里给的是默认值；只有库里为空时才回填）
               levels_root = CASE WHEN games.levels_root IS NULL OR games.levels_root = ''
                                  THEN excluded.levels_root ELSE games.levels_root END,
-              gate2_applicable = excluded.gate2_applicable, visual_mapping_json = excluded.visual_mapping_json,
+              -- gate2_applicable 同样是①登记的用户可编辑列：插件重新注册/重启对齐元数据时保留已有值
+              -- （新玩法用注册表默认值；否则会把用户登记的"不适用"覆盖回 true）
+              gate2_applicable = CASE WHEN games.gate2_applicable IS NULL
+                                      THEN excluded.gate2_applicable ELSE games.gate2_applicable END,
+              visual_mapping_json = excluded.visual_mapping_json,
               mechanics_json = excluded.mechanics_json, game_brief = excluded.game_brief,
               format_spec = excluded.format_spec, rule_matrix = excluded.rule_matrix,
               difficulty_weights_json = excluded.difficulty_weights_json, updated_at = excluded.updated_at

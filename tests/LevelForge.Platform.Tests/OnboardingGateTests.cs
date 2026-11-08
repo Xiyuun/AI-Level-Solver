@@ -55,15 +55,11 @@ public sealed class OnboardingGateTests
     {
         using var factory = new PlatformFactory();
         var client = factory.CreateClient();
-
-        // 先设为试用档（合法状态变更）
-        var trial = await client.PostAsync("/api/games/sokoban-toy/status",
-            new StringContent("""{"status":"trial"}""", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.OK, trial.StatusCode);
-
-        // 造一条门3 fail 记录（红灯）
+        await CompleteAllStepsAsync(client);
         var store = factory.Services.GetRequiredService<VerificationRecordStore>();
-        store.Insert("sokoban-toy", "gate3", "fail", summaryJson: """{"total":3,"red":1}""");
+        var hash = CurrentAdapterHash(factory);
+        store.Insert("sokoban-toy", "gate1", "pass", adapterHash: hash);
+        store.Insert("sokoban-toy", "gate3", "fail", adapterHash: hash, summaryJson: """{"total":3,"red":1}""");
 
         var promote = await client.PostAsync("/api/games/sokoban-toy/status",
             new StringContent("""{"status":"production"}""", Encoding.UTF8, "application/json"));
@@ -74,27 +70,66 @@ public sealed class OnboardingGateTests
     }
 
     [Fact]
-    public async Task 转正门禁_无红灯或无门3记录时放行()
+    public async Task 转正门禁_缺门3记录时拒绝()
     {
         using var factory = new PlatformFactory();
         var client = factory.CreateClient();
+        await CompleteAllStepsAsync(client);
+        var store = factory.Services.GetRequiredService<VerificationRecordStore>();
+        store.Insert("sokoban-toy", "gate1", "pass", adapterHash: CurrentAdapterHash(factory));
 
         var promote = await client.PostAsync("/api/games/sokoban-toy/status",
             new StringContent("""{"status":"production"}""", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.OK, promote.StatusCode);
+
+        Assert.Equal(HttpStatusCode.Conflict, promote.StatusCode);
+        Assert.Contains("门3", await promote.Content.ReadAsStringAsync());
     }
 
     [Fact]
-    public async Task 转正门禁_门3通过记录不阻断()
+    public async Task 转正门禁_适配层换过后旧证据不算数()
     {
         using var factory = new PlatformFactory();
         var client = factory.CreateClient();
+        await CompleteAllStepsAsync(client);
         var store = factory.Services.GetRequiredService<VerificationRecordStore>();
-        store.Insert("sokoban-toy", "gate3", "pass", summaryJson: """{"total":3,"red":0}""");
+        store.Insert("sokoban-toy", "gate1", "pass", adapterHash: "sha256:old-adapter");
+        store.Insert("sokoban-toy", "gate3", "pass", adapterHash: CurrentAdapterHash(factory));
+
+        var promote = await client.PostAsync("/api/games/sokoban-toy/status",
+            new StringContent("""{"status":"production"}""", Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.Conflict, promote.StatusCode);
+        Assert.Contains("指纹", await promote.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task 转正门禁_六步完成且门1门3证据对应当前版本时放行()
+    {
+        using var factory = new PlatformFactory();
+        var client = factory.CreateClient();
+        await CompleteAllStepsAsync(client);
+        var store = factory.Services.GetRequiredService<VerificationRecordStore>();
+        var hash = CurrentAdapterHash(factory);
+        store.Insert("sokoban-toy", "gate1", "pass", adapterHash: hash);
+        store.Insert("sokoban-toy", "gate3", "pass", adapterHash: hash, summaryJson: """{"total":3,"red":0}""");
 
         var promote = await client.PostAsync("/api/games/sokoban-toy/status",
             new StringContent("""{"status":"production"}""", Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.OK, promote.StatusCode);
     }
+
+    private static async Task CompleteAllStepsAsync(HttpClient client)
+    {
+        for (var step = 1; step <= 6; step++)
+        {
+            var body = JsonSerializer.Serialize(new { status = "done", detail = $"转正测试：完成第{step}步" });
+            var resp = await client.PostAsync($"/api/games/sokoban-toy/onboarding/{step}",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        }
+    }
+
+    private static string CurrentAdapterHash(PlatformFactory factory) =>
+        factory.Services.GetRequiredService<GameStore>().FindGame("sokoban-toy")!.AdapterHash;
 }
