@@ -536,3 +536,22 @@ harness 实战化（含 SessionState 域重载续跑、规范化语义哈希对�
   首批猪坐标/朝向均不同，不再是同一张图。
 - 适配层测试 28 通过；插件 hash `ceb65c17…`，门1 通过。
 - 边界：仍是"真实模板的删猪变体"，不是全新设计；全新高难关需要真实关变异器/rollout（工具通用方案 P2）。
+
+### 10.29 PiggyFarm 类型系统：18 种猪盘点 + Boom 支持 + 类型需求/渲染（2026-11-09）
+
+按主玩法源码（DataModel/Pig.cs + Controller/Pigs/*）盘点 18 种猪：
+Normal/Long/RichPig（滑动家族）、Boom（碰撞扣计数）、Spring、TimeBoom、Lock、Farmer、Balloon、RopeLong、Scissors、Duck、Sleep、Cage/CageL、Link、Zombie、BackpackSquirrel、Rabbit。
+
+- **适配层**：
+  - v1 支持子集扩为 Normal/Long/RichPig/**Boom**（499 关语料从 33 关提升到 **96 关**，403 关仍因其它特殊猪/地形/兔子拒绝）；
+  - Boom 规则实装：碰撞（自己撞上/被撞）扣 1，归零 `Failed=true`，无合法动作；状态键/语义投影/快照含 counter；
+  - 其余 14 种特殊猪在校验阶段明确 `v1 支持子集之外`，不静默当普通猪。
+- **专属 composer**：
+  - 新增 `PiggyFarmPigTypes`：18 种猪的中英别名 + 支持状态 + 显示名；
+  - 需求解析支持「N只猪」与「N只<类型>猪」（普通/大长/土豪/爆炸，含 Spring 等别名）；
+  - 预检：不支持类型直接拒绝（如"3只弹簧猪" 11ms 失败）；模板数量不足（如 >2 只土豪猪）明确拒绝；
+  - 生成：按类型过滤模板；Boom 需求把随机 Normal 转成 Boom（specialInfo=3）后求解验档；满足类型要求时不做随机删猪，避免删掉要求的类型；有类型要求时绝不回退到缺类型的模板。
+- **渲染层**：快照实体类型改为 `pigHead<Type>`/`pigBody<Type>`；视觉映射为 Normal/Long/RichPig/Boom 分别声明颜色与角标（长/富/爆），Boom 头格带 counter 属性；2×3 土豪猪与 1×2 普通猪从此可区分。
+- 实测：2 档 + "至少50只猪，其中至少3只爆炸猪" → 77 猪（72 Normal + 3 Boom + 2 RichPig）/92 步/92.2 分/2 档；快照实体类型包含 pigHeadBoom/pigBodyBoom/pigHeadRichPig；不支持类型请求 11ms 失败。
+- 测试：适配层 **34**（Boom 碰撞归零、类型解析/预检、类型需求生成、视觉映射/快照实体）；门1 通过。
+- 边界：其余 14 种特殊猪仍未建模；正式支持需逐条实现规则 + 门2。
