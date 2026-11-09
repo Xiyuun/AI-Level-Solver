@@ -338,6 +338,7 @@ public static class PiggyFarmLevels
             "Boom" => (1, 2),
             "Long" => (1, 3),
             "RichPig" => (2, 3),
+            "Duck" => (1, 1),
             _ => (0, 0)
         };
         if (expected.Item1 > 0)

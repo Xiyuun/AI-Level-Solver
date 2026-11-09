@@ -40,13 +40,21 @@ public static class PiggyFarmComposer
         var req = ParseRequirements(context.SpecialRequirements, errors);
         if (errors.Count > 0) return errors;
 
-        var capacity = band switch { 1 => 18, 2 => 77, 3 => MapCapacityPigs, _ => 0 };
+        var templates = band == 2 ? PiggyFarmTemplates.Band2 : PiggyFarmTemplates.Band3;
+        // 动态容量：按"类型子集过滤后可用猪数最大"的模板算（池随批次扩充，常数会过时）
+        var allowed = AllowedTypes(req);
+        var capacity = band switch
+        {
+            1 => 18,
+            _ => templates
+                .Select(t => CountTypes(t))
+                .Max(c => c.Sum(kv => allowed.Contains(kv.Key) ? kv.Value : 0)),
+        };
         if (req.Total > capacity)
         {
             errors.Add($"目标 {band} 档可用模板最多容纳 {capacity} 只（3 档最大 {MapCapacityPigs}）；请换档或降低数量");
         }
 
-        var templates = band == 2 ? PiggyFarmTemplates.Band2 : PiggyFarmTemplates.Band3;
         foreach (var (type, count) in req.Types)
         {
             var max = type == "Boom"
@@ -58,6 +66,14 @@ public static class PiggyFarmComposer
             }
         }
         return errors;
+    }
+
+    // 输出允许的类型集合：普通猪 + 明确要求的类型（需求即契约——未要求的特殊猪不得出现）
+    private static HashSet<string> AllowedTypes(Requirements req)
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { "Normal" };
+        foreach (var key in req.Types.Keys) allowed.Add(key);
+        return allowed;
     }
 
     public static ComposeResult Compose(string modelOutput, string? levelNumber) =>
@@ -86,20 +102,22 @@ public static class PiggyFarmComposer
         }
 
         var templates = band == 2 ? PiggyFarmTemplates.Band2 : PiggyFarmTemplates.Band3;
-        // 类型纯度：输出只包含 普通猪 + 明确要求的类型——模板自带的、未要求的特殊猪（土豪猪等）一律移除。
-        // 需求即契约：用户没要的类型不该"顺带"出现（模板池薄，类型残留非常显眼）。
-        var allowed = new HashSet<string>(StringComparer.Ordinal) { "Normal" };
-        foreach (var key in req.Types.Keys) allowed.Add(key);
+        // 类型纯度（候选过滤）：有明确类型需求时，含未要求特殊猪的模板直接不选——保留关卡完整结构
+        //（原地剥猪会破坏设计好的阻挡依赖，产出平凡关卡）。需求即契约：要了什么就出什么。
+        // 无类型需求时不过滤：产出即真实关卡原貌（质量门保证品质，类型多样是关卡丰富度的一部分）。
+        var allowed = AllowedTypes(req);
         var candidates = templates
             .Select(t => (Json: t, Types: CountTypes(t)))
-            .Select(c => (Json: c.Json, Types: c.Types, Usable: c.Types.Sum(kv => allowed.Contains(kv.Key) ? kv.Value : 0)))
-            .Where(c => required <= c.Usable)
+            .Where(c => req.Types.Count == 0 || c.Types.Keys.All(allowed.Contains))
+            .Where(c => required <= c.Types.Sum(kv => kv.Value))
             .Where(c => req.Types.All(kv => kv.Key == "Boom"
                 ? c.Types.GetValueOrDefault("Normal") >= kv.Value
                 : c.Types.GetValueOrDefault(kv.Key) >= kv.Value))
+            .Select(c => (Json: c.Json, Usable: c.Types.Sum(kv => kv.Value)))
             .ToList();
-        // 3 档优先真实原生 3 档模板（19/29/59）；112 猪密集模板只在需求 >96 时兜底
-        if (band == 3 && required <= 96)
+        // 3 档优先真实原生 3 档模板（19/29/59）；112 猪密集/大鸭群模板只在需求 >96 或有类型要求时启用
+        //（类型可得性优先于尺寸偏好：30 只小黄鸭只有 110 猪模板能满足，不能被 ≤96 偏好排除）
+        if (band == 3 && required <= 96 && req.Types.Count == 0)
         {
             candidates = candidates.Where(c => c.Usable <= 96).ToList();
         }
@@ -119,7 +137,7 @@ public static class PiggyFarmComposer
             var remove = context.Seed == 0 && context.SpecialRequirements is null
                 ? 0
                 : req.Types.Count == 0 && maxRemove > 0 ? random.Next(0, maxRemove + 1) : 0;
-            var json = TransformTemplate(chosen.Json, levelNumber, band.Value, symmetry, remove, random, allowed);
+            var json = TransformTemplate(chosen.Json, levelNumber, band.Value, symmetry, remove, random);
             if (req.Types.TryGetValue("Boom", out var boomCount) && boomCount > 0)
             {
                 json = ConvertNormalsToBoom(json, boomCount, random);
@@ -147,7 +165,7 @@ public static class PiggyFarmComposer
         }
 
         // 兜底：原始模板（不做删猪）至少保证可展示
-        var fallback = TransformTemplate(candidates[0].Json, levelNumber, band.Value, 0, 0, random, allowed);
+        var fallback = TransformTemplate(candidates[0].Json, levelNumber, band.Value, 0, 0, random);
         return PiggyFarmLevels.Validate(fallback).Count > 0
             ? ComposeResult.Fail(PiggyFarmLevels.Validate(fallback))
             : ComposeResult.Ok(fallback);
@@ -203,22 +221,12 @@ public static class PiggyFarmComposer
         return Serialize(levelNumber, 1, pigs, "v1-module-1档");
     }
 
-    // 真实模板：重设 levelId/difficulty/levelName，按种子做四种对称变换（保持 12×19 与可解性）；
-    // allowedTypes 非空时先做类型纯度过滤——未要求的特殊猪直接移除（普通猪与要求类型保留）
+    // 真实模板：重设 levelId/difficulty/levelName，按种子做四种对称变换（保持 12×19 与可解性）
     private static string TransformTemplate(
-        string templateJson, string? levelNumber, int band, int symmetry, int removeCount, Random random,
-        IReadOnlySet<string>? allowedTypes = null)
+        string templateJson, string? levelNumber, int band, int symmetry, int removeCount, Random random)
     {
         var node = JsonNode.Parse(templateJson)!;
         var pigs = node["pigs"]!.AsArray();
-        if (allowedTypes is not null)
-        {
-            for (var i = pigs.Count - 1; i >= 0; i--)
-            {
-                var type = pigs[i]?["pigType"]?.GetValue<string>();
-                if (type is not null && !allowedTypes.Contains(type)) pigs.RemoveAt(i);
-            }
-        }
         foreach (var pigNode in pigs)
         {
             var pig = pigNode!.AsObject();

@@ -90,7 +90,9 @@ public sealed class PiggyFarmFacade : IGameFacade, ILevelQualityGate, ILevelComp
         }
 
         var state = AdapterInstance.LoadLevel(level);
-        var legal = AdapterInstance.GetLegalMoves(state).Count;
+        // "可直接起步" = 能沿朝向滑行（不含原地顶撞——顶撞是 v1.1 起的合法动作，但不代表该猪未被阻挡）
+        // 小黄鸭不可点击，也不计入起步
+        var legal = state.Pigs.Count(p => p.Type != "Duck" && PiggyFarmAdapter.CanAdvance(state, p));
         if (pigs.Count >= 8 && legal * 2 > pigs.Count)
         {
             errors.Add($"初始可走猪过多：{legal}/{pigs.Count} 只可直接起步（需 ≤50%，要有阻挡依赖）");

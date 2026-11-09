@@ -16,11 +16,14 @@ public sealed record PiggyFarmState(
 // 结构化动作：点击一只猪（字段足以无歧义定位目标；不从描述文本反解析）
 public sealed record PiggyFarmMove(int PigId);
 
-// piggyfarm 适配器：ClassicMode 滑动解谜的 v1 规则子集
-//   - 支持 Normal / Long / RichPig 三种"规则相同、脚印不同"的猪（游戏侧均为 NormalPig 派生）
-//   - 规则：点击 → 沿朝向逐格滑动；前方撞到其它猪的脚印即停；有格子越过地图边界即整只离场
+// piggyfarm 适配器：ClassicMode 滑动解谜的 v1.1 规则子集
+//   - 支持 Normal / Long / RichPig（规则相同、脚印不同）+ Boom（碰撞计数，归零判负）+ Duck（自动离场）
+//   - 规则：点击 → 沿朝向逐格滑动；前方撞到其它猪的脚印即停；有格子越过地图边界即整只离场；
+//     被挡的猪也可点击 = 原地顶撞（起步即碰撞，触发碰撞事件但不位移）
+//   - 小黄鸭（Duck.cs）：不可点击；任一离场/碰撞事件后，站立鸭子各自 BFS 寻路到边界（鸭不挡鸭），
+//     可达即全部离场（离场时穿场而过，不与任何猪碰撞）
 //   - 胜利：场上猪清空；无合法操作 = 死局（平台侧按搜索结论表达，不在这里判负）
-// 不支持的机制（升降梯/动态兔子/特殊猪）在关卡校验阶段如实拒绝，不静默降级
+// 不支持的机制（其余特殊猪/升降梯/动态兔子）在关卡校验阶段如实拒绝，不静默降级
 public sealed class PiggyFarmAdapter :
     IGameAdapter<PiggyFarmLevel, PiggyFarmState, PiggyFarmMove>,
     IExecutionProtocol<PiggyFarmState, PiggyFarmMove>
@@ -42,13 +45,14 @@ public sealed class PiggyFarmAdapter :
         return new PiggyFarmState(level.MapWidth, level.MapHeight, pigs);
     }
 
-    // 当前局面全部合法操作：只有「前进一步不被其它猪脚印挡住」的猪才能起步
-    // 顺序稳定：按猪 Id 升序；空列表 = 无合法操作（死局）
+    // 当前局面全部合法操作（顺序稳定：按猪 Id 升序；空列表 = 无合法操作）：
+    //   - 小黄鸭不可点击（游戏中 SkipWalkAfterClick，点击只广播不移动）
+    //   - 普通猪两种合法操作：能前进 = 滑行；被挡 = 原地顶撞（游戏里点击起步后立刻碰撞，同样触发碰撞事件）
     public IReadOnlyList<PiggyFarmMove> GetLegalMoves(PiggyFarmState state)
     {
         if (state.Failed) return Array.Empty<PiggyFarmMove>();
         return state.Pigs
-            .Where(pig => CanAdvance(state, pig))
+            .Where(pig => pig.Type != "Duck")
             .Select(pig => new PiggyFarmMove(pig.Id))
             .ToArray();
     }
@@ -58,40 +62,71 @@ public sealed class PiggyFarmAdapter :
     {
         var pig = state.Pigs.FirstOrDefault(p => p.Id == move.PigId)
             ?? throw new ArgumentException($"非法动作：关卡中没有猪 #{move.PigId}");
+        if (pig.Type == "Duck")
+        {
+            throw new ArgumentException("非法动作：小黄鸭不可点击（游戏中点击只广播事件，不产生移动）");
+        }
         if (!CanAdvance(state, pig))
         {
-            throw new ArgumentException($"非法动作：猪 #{move.PigId} 沿朝向前进一步被阻挡，不能起步");
+            // 原地顶撞：起步即与阻挡猪碰撞（游戏侧同样触发碰撞回调），随后结算鸭子离场
+            return ApplyBump(state, pig);
         }
         return ApplySlide(state, pig).Next;
     }
 
-    // 滑行并返回新状态（求解器直接用，避免重复模拟）：离场 = 移除该猪；否则更新占格
+    // 滑行并返回新状态（求解器直接用，避免重复模拟）：离场 = 移除该猪；否则更新占格。
+    // 无论离场还是碰撞，结算后都触发小黄鸭自动离场检查（游戏中离场/碰撞事件都会广播给鸭子）
     public static (PiggyFarmState Next, SlideResult Slide) ApplySlide(PiggyFarmState state, PiggyFarmPig pig)
     {
         var slide = SimulateSlide(state, pig);
+        var failed = state.Failed;
+        PiggyFarmState next;
         if (slide.Exited)
         {
-            return (state with { Pigs = state.Pigs.Where(p => p.Id != pig.Id).ToArray() }, slide);
+            next = state with { Pigs = state.Pigs.Where(p => p.Id != pig.Id).ToArray() };
         }
-
-        // 撞到阻挡猪：移动方和被撞方都要结算 BoomPig 的爆炸计数（与游戏 NormalPig 碰撞回调一致）
-        var failed = state.Failed;
-        var moved = pig with { Cells = slide.FinalCells };
-        if (pig.Type == "Boom")
+        else
         {
-            moved = moved with { Counter = pig.Counter - 1 };
-            if (moved.Counter <= 0) failed = true;
-        }
+            // 撞到阻挡猪：移动方和被撞方都要结算 BoomPig 的爆炸计数（与游戏 NormalPig 碰撞回调一致）
+            var moved = pig with { Cells = slide.FinalCells };
+            if (pig.Type == "Boom")
+            {
+                moved = moved with { Counter = pig.Counter - 1 };
+                if (moved.Counter <= 0) failed = true;
+            }
 
+            var pigs = new List<PiggyFarmPig>(state.Pigs.Count);
+            foreach (var other in state.Pigs)
+            {
+                if (other.Id == pig.Id)
+                {
+                    pigs.Add(moved);
+                    continue;
+                }
+                if (other.Id == slide.BlockerId && other.Type == "Boom")
+                {
+                    var hit = other with { Counter = other.Counter - 1 };
+                    if (hit.Counter <= 0) failed = true;
+                    pigs.Add(hit);
+                    continue;
+                }
+                pigs.Add(other);
+            }
+            next = state with { Pigs = pigs.OrderBy(p => p.Id).ToArray() };
+        }
+        // 结算小黄鸭自动离场（离场/碰撞事件都会触发）；最后统一落 Failed 标记
+        return (ResolveDucks(next) with { Failed = failed }, slide);
+    }
+
+    // 原地顶撞：起步即碰撞阻挡猪（无位移）。爆炸计数双方结算；随后结算鸭子离场。
+    public static PiggyFarmState ApplyBump(PiggyFarmState state, PiggyFarmPig pig)
+    {
+        var slide = SimulateSlide(state, pig);   // 只为取 BlockerId（Steps 必为 0）
+        var failed = state.Failed;
         var pigs = new List<PiggyFarmPig>(state.Pigs.Count);
         foreach (var other in state.Pigs)
         {
-            if (other.Id == pig.Id)
-            {
-                pigs.Add(moved);
-                continue;
-            }
-            if (other.Id == slide.BlockerId && other.Type == "Boom")
+            if (other.Type == "Boom" && (other.Id == pig.Id || other.Id == slide.BlockerId))
             {
                 var hit = other with { Counter = other.Counter - 1 };
                 if (hit.Counter <= 0) failed = true;
@@ -100,7 +135,52 @@ public sealed class PiggyFarmAdapter :
             }
             pigs.Add(other);
         }
-        return (state with { Pigs = pigs.OrderBy(p => p.Id).ToArray(), Failed = failed }, slide);
+        var next = ResolveDucks(state with { Pigs = pigs.OrderBy(p => p.Id).ToArray() }) with { Failed = failed };
+        return next;
+    }
+
+    // 小黄鸭自动离场（游戏 Duck.cs：任一离场/碰撞事件后，站立的鸭子各自 BFS 寻路到边界，可达即离场）：
+    //   - BFS 把其它鸭子的占格视为空（鸭不挡鸭）→ 每只鸭的可达性与其它鸭无关，单趟判定即可
+    //   - 离场的鸭子穿场而过（ShouldIgnorePigCollision），不与任何猪碰撞
+    //   - 被铁笼圈住的鸭子不寻路（游戏 line 76/153）——铁笼属后续批次，当前无笼时全部参与
+    public static PiggyFarmState ResolveDucks(PiggyFarmState state)
+    {
+        var ducks = state.Pigs.Where(p => p.Type == "Duck").ToArray();
+        if (ducks.Length == 0) return state;
+        var occupied = OccupancyOf(state.Pigs.Where(p => p.Type != "Duck"));
+        var leaving = new List<int>();
+        foreach (var duck in ducks)
+        {
+            if (DuckHasPathToEdge(state, duck.Cells[0], occupied))
+            {
+                leaving.Add(duck.Id);
+            }
+        }
+        if (leaving.Count == 0) return state;
+        return state with { Pigs = state.Pigs.Where(p => !leaving.Contains(p.Id)).OrderBy(p => p.Id).ToArray() };
+    }
+
+    // 小黄鸭 BFS 寻路（游戏 Duck.cs:236-289 的可达性判定；邻居顺序 Up/Right/Down/Left 只影响路径形状，
+    // 不影响可达结论——离场鸭子互相穿透，可达即全部离场）：从鸭子格出发，4 邻接扩展到任意边界外即可达
+    private static bool DuckHasPathToEdge(
+        PiggyFarmState state, GridCell start, Dictionary<GridCell, int> occupied)
+    {
+        var visited = new HashSet<GridCell> { start };
+        var queue = new Queue<GridCell>();
+        queue.Enqueue(start);
+        while (queue.Count > 0)
+        {
+            var cell = queue.Dequeue();
+            foreach (var (dx, dy) in new[] { (0, -1), (1, 0), (0, 1), (-1, 0) })   // Up, Right, Down, Left
+            {
+                var next = new GridCell(cell.X + dx, cell.Y + dy);
+                if (!InBounds(state, next)) return true;   // 到边界外 = 可离场
+                if (!visited.Add(next)) continue;
+                if (occupied.ContainsKey(next)) continue;  // 其它猪挡路；鸭子占格视为空（鸭不挡鸭）
+                queue.Enqueue(next);
+            }
+        }
+        return false;
     }
 
     // 胜利：场上猪清空（与游戏本体 TrySettleIfCleared 的可判定部分一致；地形层已由子集声明排除）
@@ -132,6 +212,10 @@ public sealed class PiggyFarmAdapter :
     {
         var pig = state.Pigs.FirstOrDefault(p => p.Id == move.PigId)
             ?? throw new ArgumentException($"非法动作：关卡中没有猪 #{move.PigId}");
+        if (pig.Type == "Duck")
+        {
+            return $"小黄鸭 #{pig.Id} 不可点击（点击只广播事件）";
+        }
         var facing = PiggyFarmLevels.FacingName(pig.Facing);
         var slide = SimulateSlide(state, pig);
         if (slide.Exited)
@@ -140,7 +224,7 @@ public sealed class PiggyFarmAdapter :
         }
         if (slide.Steps == 0)
         {
-            return $"点击 {pig.Type} #{pig.Id}（朝{facing}）→ 被 #{slide.BlockerId} 阻挡，无法起步";
+            return $"点击 {pig.Type} #{pig.Id}（朝{facing}）→ 原地顶撞 #{slide.BlockerId}（触发碰撞事件）";
         }
         return $"点击 {pig.Type} #{pig.Id}（朝{facing}）→ 滑行 {slide.Steps} 格后被 #{slide.BlockerId} 阻挡停下";
     }
