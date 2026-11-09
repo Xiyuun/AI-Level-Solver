@@ -86,17 +86,22 @@ public static class PiggyFarmComposer
         }
 
         var templates = band == 2 ? PiggyFarmTemplates.Band2 : PiggyFarmTemplates.Band3;
+        // 类型纯度：输出只包含 普通猪 + 明确要求的类型——模板自带的、未要求的特殊猪（土豪猪等）一律移除。
+        // 需求即契约：用户没要的类型不该"顺带"出现（模板池薄，类型残留非常显眼）。
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { "Normal" };
+        foreach (var key in req.Types.Keys) allowed.Add(key);
         var candidates = templates
-            .Select(t => (Json: t, Pigs: CountPigs(t), Types: CountTypes(t)))
-            .Where(t => required <= t.Pigs)
-            .Where(t => req.Types.All(kv => kv.Key == "Boom"
-                ? t.Types.GetValueOrDefault("Normal") >= kv.Value
-                : t.Types.GetValueOrDefault(kv.Key) >= kv.Value))
+            .Select(t => (Json: t, Types: CountTypes(t)))
+            .Select(c => (Json: c.Json, Types: c.Types, Usable: c.Types.Sum(kv => allowed.Contains(kv.Key) ? kv.Value : 0)))
+            .Where(c => required <= c.Usable)
+            .Where(c => req.Types.All(kv => kv.Key == "Boom"
+                ? c.Types.GetValueOrDefault("Normal") >= kv.Value
+                : c.Types.GetValueOrDefault(kv.Key) >= kv.Value))
             .ToList();
         // 3 档优先真实原生 3 档模板（19/29/59）；112 猪密集模板只在需求 >96 时兜底
         if (band == 3 && required <= 96)
         {
-            candidates = candidates.Where(t => t.Pigs <= 96).ToList();
+            candidates = candidates.Where(c => c.Usable <= 96).ToList();
         }
         if (candidates.Count == 0)
         {
@@ -109,12 +114,12 @@ public static class PiggyFarmComposer
         {
             var chosen = candidates[random.Next(candidates.Count)];
             var symmetry = random.Next(4);
-            var maxRemove = Math.Max(0, Math.Min(8, chosen.Pigs - required));
+            var maxRemove = Math.Max(0, Math.Min(8, chosen.Usable - required));
             // 有猪类型要求时不删猪，避免把要求的类型删掉；变化交给模板/对称/Boom 转换
             var remove = context.Seed == 0 && context.SpecialRequirements is null
                 ? 0
                 : req.Types.Count == 0 && maxRemove > 0 ? random.Next(0, maxRemove + 1) : 0;
-            var json = TransformTemplate(chosen.Json, levelNumber, band.Value, symmetry, remove, random);
+            var json = TransformTemplate(chosen.Json, levelNumber, band.Value, symmetry, remove, random, allowed);
             if (req.Types.TryGetValue("Boom", out var boomCount) && boomCount > 0)
             {
                 json = ConvertNormalsToBoom(json, boomCount, random);
@@ -142,7 +147,7 @@ public static class PiggyFarmComposer
         }
 
         // 兜底：原始模板（不做删猪）至少保证可展示
-        var fallback = TransformTemplate(candidates[0].Json, levelNumber, band.Value, 0, 0, random);
+        var fallback = TransformTemplate(candidates[0].Json, levelNumber, band.Value, 0, 0, random, allowed);
         return PiggyFarmLevels.Validate(fallback).Count > 0
             ? ComposeResult.Fail(PiggyFarmLevels.Validate(fallback))
             : ComposeResult.Ok(fallback);
@@ -198,12 +203,22 @@ public static class PiggyFarmComposer
         return Serialize(levelNumber, 1, pigs, "v1-module-1档");
     }
 
-    // 真实模板：重设 levelId/difficulty/levelName，按种子做四种对称变换（保持 12×19 与可解性）
+    // 真实模板：重设 levelId/difficulty/levelName，按种子做四种对称变换（保持 12×19 与可解性）；
+    // allowedTypes 非空时先做类型纯度过滤——未要求的特殊猪直接移除（普通猪与要求类型保留）
     private static string TransformTemplate(
-        string templateJson, string? levelNumber, int band, int symmetry, int removeCount, Random random)
+        string templateJson, string? levelNumber, int band, int symmetry, int removeCount, Random random,
+        IReadOnlySet<string>? allowedTypes = null)
     {
         var node = JsonNode.Parse(templateJson)!;
         var pigs = node["pigs"]!.AsArray();
+        if (allowedTypes is not null)
+        {
+            for (var i = pigs.Count - 1; i >= 0; i--)
+            {
+                var type = pigs[i]?["pigType"]?.GetValue<string>();
+                if (type is not null && !allowedTypes.Contains(type)) pigs.RemoveAt(i);
+            }
+        }
         foreach (var pigNode in pigs)
         {
             var pig = pigNode!.AsObject();
@@ -240,10 +255,11 @@ public static class PiggyFarmComposer
             {
                 pigs.RemoveAt(index);
             }
-            for (var i = 0; i < pigs.Count; i++)
-            {
-                pigs[i]!["id"] = i;
-            }
+        }
+        // 类型纯度过滤与删猪都会让 id 出现空洞：统一重编号
+        for (var i = 0; i < pigs.Count; i++)
+        {
+            pigs[i]!["id"] = i;
         }
         node["levelId"] = int.TryParse(levelNumber, out var parsed) ? parsed : 900 + band;
         node["difficulty"] = band;
@@ -319,16 +335,18 @@ public static class PiggyFarmComposer
 
     private sealed record Requirements(int Total, IReadOnlyDictionary<string, int> Types);
 
-    // 解析"N只猪"与"N只<类型>猪"；类型名走 PiggyFarmPigTypes 别名表，未知/不支持的类型直接给错误
+    // 解析"N只猪"与"N只<类型>"——类型词不以"猪"结尾也算（如"30只小黄鸭"）；
+    // 类型名走 PiggyFarmPigTypes 别名表，未知/不支持的类型直接给错误，绝不静默丢弃
     private static Requirements ParseRequirements(string? text, List<string> errors)
     {
         var types = new Dictionary<string, int>(StringComparer.Ordinal);
         var total = 0;
         if (string.IsNullOrWhiteSpace(text)) return new Requirements(0, types);
-        foreach (Match match in Regex.Matches(text, @"(\d+)\s*只([\u4e00-\u9fa5A-Za-z]*?)猪"))
+        foreach (Match match in Regex.Matches(text, @"(\d+)\s*只([\u4e00-\u9fa5A-Za-z]{0,10})"))
         {
             if (!int.TryParse(match.Groups[1].Value, out var count) || count <= 0) continue;
             var typeText = match.Groups[2].Value.Trim();
+            if (typeText.EndsWith("猪", StringComparison.Ordinal)) typeText = typeText[..^1];   // "土豪猪"→"土豪"；裸"猪"→""（总只数）
             if (typeText.Length == 0)
             {
                 total = Math.Max(total, count);

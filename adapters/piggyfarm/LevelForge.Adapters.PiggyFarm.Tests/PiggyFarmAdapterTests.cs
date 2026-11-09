@@ -343,7 +343,9 @@ public sealed class PiggyFarmComposerTests
         Assert.Empty(facade.FormatErrors(json));
         Assert.Empty(facade.QualityErrors(json));
         var level = PiggyFarmLevels.Load(json);
-        Assert.Equal(77, level.Pigs.Count);
+        // Level374 原生 77 只；需求为空时类型纯度移除 2 只未要求的 RichPig → 75
+        Assert.Equal(75, level.Pigs.Count);
+        Assert.DoesNotContain(level.Pigs, p => p.Type == "RichPig");
 
         var outcome = facade.Solve(new SolveCommand(json, Encoding.UTF8.GetBytes(json), "compose-2",
             TimeSpan.FromSeconds(20)));
@@ -359,7 +361,9 @@ public sealed class PiggyFarmComposerTests
         Assert.Empty(facade.FormatErrors(json));
         Assert.Empty(facade.QualityErrors(json));
         var level = PiggyFarmLevels.Load(json);
-        Assert.Equal(89, level.Pigs.Count);
+        // 19/29/59 模板含大长猪；需求为空时类型纯度移除未要求的 Long → 89-8=81
+        Assert.Equal(81, level.Pigs.Count);
+        Assert.DoesNotContain(level.Pigs, p => p.Type == "Long");
 
         var outcome = facade.Solve(new SolveCommand(json, Encoding.UTF8.GetBytes(json), "compose-3",
             TimeSpan.FromSeconds(20)));
@@ -451,6 +455,67 @@ public sealed class PiggyFarmComposerPreflightTests
             .Compose("{}", "805", new ComposeContext("805", 2, "至少包含78只猪", 5));
         Assert.Null(result.LevelJson);
         Assert.Equal(ComposeFailureKind.Constraint, result.Kind);
+    }
+}
+
+// 需求解析与类型纯度：类型词不以"猪"结尾也要识别（如"30只小黄鸭"）；
+// 未要求的特殊猪不得"顺带"出现在输出——模板自带的土豪猪/大长猪一律移除（需求即契约）
+public sealed class PiggyFarmComposerRequirementPurityTests
+{
+    private static readonly PiggyFarmFacade Facade = new();
+
+    [Fact]
+    public void 需求_不结尾猪字的类型被解析并如实拒绝_小黄鸭()
+    {
+        // 旧正则只认"N只…猪"："30只小黄鸭"整体匹配失败，鸭子需求被静默丢弃（既不产出也不报错）
+        var errors = Facade.ValidateContext(new ComposeContext("500", 2, "至少包含70只猪，其中包含30只小黄鸭", 1));
+        Assert.Contains(errors, e => e.Contains("小黄鸭") && e.Contains("未建模"));
+    }
+
+    [Fact]
+    public void 需求_多个不支持类型逐条给原因_弹簧猪与兔子()
+    {
+        var errors = Facade.ValidateContext(new ComposeContext("500", 3, "加入3只弹簧猪和2只兔子", 1));
+        Assert.Contains(errors, e => e.Contains("弹簧"));
+        Assert.Contains(errors, e => e.Contains("兔"));
+    }
+
+    [Fact]
+    public void 需求_土豪猪别名按要求识别()
+    {
+        Assert.Empty(Facade.ValidateContext(new ComposeContext(null, 2, "至少包含2只土豪猪", 1)));
+    }
+
+    [Fact]
+    public void 类型纯度_未要求的土豪猪与大长猪不出现在输出()
+    {
+        var result = Facade.Compose("""{"band":2}""", "500", new ComposeContext("500", 2, "至少包含70只猪", 12345));
+        Assert.NotNull(result.LevelJson);
+        Assert.Empty(result.Errors);
+        var counts = ParseTypes(result.LevelJson!);
+        Assert.DoesNotContain("RichPig", counts.Keys);
+        Assert.DoesNotContain("Long", counts.Keys);
+        Assert.DoesNotContain("Boom", counts.Keys);
+        Assert.True(counts.GetValueOrDefault("Normal") >= 70);
+    }
+
+    [Fact]
+    public void 类型纯度_要求的土豪猪按需求保留()
+    {
+        var result = Facade.Compose("""{"band":2}""", "501", new ComposeContext("501", 2, "至少包含2只土豪猪", 777));
+        Assert.NotNull(result.LevelJson);
+        Assert.True(ParseTypes(result.LevelJson!).GetValueOrDefault("RichPig") >= 2);
+    }
+
+    private static Dictionary<string, int> ParseTypes(string levelJson)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var pig in JsonNode.Parse(levelJson)?["pigs"]!.AsArray())
+        {
+            var type = pig?["pigType"]?.GetValue<string>() ?? "";
+            counts[type] = counts.GetValueOrDefault(type) + 1;
+        }
+        return counts;
     }
 }
 
