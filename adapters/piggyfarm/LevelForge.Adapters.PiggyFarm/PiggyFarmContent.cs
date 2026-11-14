@@ -63,6 +63,13 @@ public static class PiggyFarmContent
             "pigType": { "render": "badge", "text": "爆", "color": "#651b1b" } }
         },
         "pigBodyBoom": { "shape": "rounded", "fill": "#bf3b3b", "size": 0.86 },
+        "pigHeadSpring": {
+          "shape": "rounded", "fill": "#4fbf7a", "size": 0.92,
+          "props": { "facing": { "render": "arrow", "color": "#ffffff",
+              "rotate": { "Up": 0, "Right": 90, "Down": 180, "Left": 270 } },
+            "pigType": { "render": "badge", "text": "弹", "color": "#0f5132" } }
+        },
+        "pigBodySpring": { "shape": "rounded", "fill": "#3da565", "size": 0.86 },
         "pigHeadDuck": {
           "shape": "circle", "fill": "#f2d24b", "size": 0.95,
           "props": { "pigType": { "render": "badge", "text": "鸭", "color": "#6b5300" } }

@@ -43,8 +43,8 @@ public sealed class PiggyFarmAdapterTests
     {
         Assert.Empty(PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Boom", (2, 2), (3, 2)))));
         Assert.Empty(PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Zombie", (2, 2), (3, 2)))));
-        var errors = PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Spring", (2, 2), (3, 2))));
-        Assert.Contains(errors, e => e.Contains("v1 支持子集之外") && e.Contains("Spring"));
+        var errors = PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Scissors", (2, 2), (3, 2))));
+        Assert.Contains(errors, e => e.Contains("v1 支持子集之外") && e.Contains("Scissors"));
     }
 
     [Fact]
@@ -282,9 +282,9 @@ public sealed class PiggyFarmAdapterTests
             unsupported++;
             Assert.Contains(errors, e => e.Contains("v1 支持子集之外"));
         }
-        // v1.1 子集：Normal/Long/RichPig/Boom/Duck、无升降梯、无动态兔子 —— 本语料实测 175 关
-        Assert.Equal(175, accepted);
-        Assert.Equal(324, unsupported);
+        // v1.1 子集：Normal/Long/RichPig/Boom/Duck、无升降梯、无动态兔子 —— 本语料实测 264 关
+        Assert.Equal(264, accepted);
+        Assert.Equal(235, unsupported);
     }
 
     #endregion
@@ -477,17 +477,17 @@ public sealed class PiggyFarmComposerRequirementPurityTests
     }
 
     [Fact]
-    public void 需求_不支持类型仍如实拒绝_弹簧猪()
+    public void 需求_不支持类型仍如实拒绝_剪刀猪()
     {
-        var errors = Facade.ValidateContext(new ComposeContext("500", 2, "至少包含3只弹簧猪", 1));
-        Assert.Contains(errors, e => e.Contains("弹簧猪") || e.Contains("Spring"));
+        var errors = Facade.ValidateContext(new ComposeContext("500", 2, "至少包含3只剪刀猪", 1));
+        Assert.Contains(errors, e => e.Contains("剪刀猪") || e.Contains("Scissors"));
     }
 
     [Fact]
-    public void 需求_多个不支持类型逐条给原因_弹簧猪与兔子()
+    public void 需求_多个不支持类型逐条给原因_睡猪与兔子()
     {
-        var errors = Facade.ValidateContext(new ComposeContext("500", 3, "加入3只弹簧猪和2只兔子", 1));
-        Assert.Contains(errors, e => e.Contains("弹簧"));
+        var errors = Facade.ValidateContext(new ComposeContext("500", 3, "加入3只睡猪和2只兔子", 1));
+        Assert.Contains(errors, e => e.Contains("睡"));
         Assert.Contains(errors, e => e.Contains("兔"));
     }
 
@@ -567,14 +567,14 @@ public sealed class PiggyFarmPigTypeTests
     }
 
     [Fact]
-    public void 类型需求_爆炸猪可解析_弹簧猪明确拒绝()
+    public void 类型需求_爆炸猪可解析_定时爆炸猪明确拒绝()
     {
         var facade = new PiggyFarmFacade();
         Assert.Empty(facade.ValidateContext(new ComposeContext("991", 2, "至少包含3只爆炸猪", 1)));
 
-        var errors = facade.ValidateContext(new ComposeContext("992", 2, "至少包含3只弹簧猪", 1));
+        var errors = facade.ValidateContext(new ComposeContext("992", 2, "至少包含3只定时炸弹猪", 1));
         Assert.NotEmpty(errors);
-        Assert.Contains(errors, e => e.Contains("弹簧猪") && e.Contains("支持子集之外"));
+        Assert.Contains(errors, e => e.Contains("定时爆炸猪") && e.Contains("支持子集之外"));
     }
 
     [Fact]
@@ -871,5 +871,130 @@ public sealed class PiggyFarmZombieRuleTests
         Assert.Equal("Normal", after1.Pigs.Single(p => p.Id == 3).Type);
         var after2 = Adapter.ApplyMove(after1, new PiggyFarmMove(2));   // #2 被挡 → 顶撞 #3 → 感染
         Assert.Equal("Zombie", after2.Pigs.Single(p => p.Id == 3).Type);
+    }
+}
+
+// 弹簧猪规则（SpringPig.cs 契约）：走位与普通猪一致；滑行被猪挡住时不停止——弹回起始格/朝向
+//（碰撞事件照常触发：阻挡方爆炸计数递减、鸭子重寻路）；弹回途中不会被第三方打断（回合制即时完成）；
+// 撞墙正常离场；顶撞（零距离碰撞）无位移、事件照常触发
+public sealed class PiggyFarmSpringRuleTests
+{
+    private static readonly PiggyFarmAdapter Adapter = new();
+
+    private static string Spring(int id, string facing, (int X, int Y) a, (int X, int Y) b) =>
+        $$"""{"id":{{id}},"facing":"{{facing}}","pigType":"Spring","specialInfo":"","occupiedCells":[{"x":{{a.X}},"y":{{a.Y}}},{"x":{{b.X}},"y":{{b.Y}}}]}""";
+
+    private static string Duck(int id, int x, int y) =>
+        $$"""{"id":{{id}},"facing":"Up","pigType":"Duck","specialInfo":"","occupiedCells":[{"x":{{x}},"y":{{y}}}]}""";
+
+    private static string Pig(int id, string facing, (int X, int Y) a, (int X, int Y) b, string type = "Normal") =>
+        $$"""{"id":{{id}},"facing":"{{facing}}","pigType":"{{type}}","specialInfo":"3","occupiedCells":[{"x":{{a.X}},"y":{{a.Y}}},{"x":{{b.X}},"y":{{b.Y}}}]}""";
+
+    private static string Level(string pigsJson, int width = 8, int height = 6)
+    {
+        var count = JsonNode.Parse("[" + pigsJson + "]")!.AsArray().Count;
+        return $$"""{"levelId":970,"difficulty":2,"levelName":"spring","mapWidth":{{width}},"mapHeight":{{height}},"pigCount":{{count}},"pigs":[{{pigsJson}}],"terrainElements":[]}""";
+    }
+
+    private static PiggyFarmState LoadState(string pigsJson) =>
+        Adapter.LoadLevel(PiggyFarmLevels.Load(Level(pigsJson)));
+
+    [Fact]
+    public void 解析_Spring双格脚印合法()
+    {
+        var json = Level(Spring(1, "Right", (0, 2), (1, 2)));
+        Assert.Empty(new PiggyFarmFacade().FormatErrors(json));
+        Assert.Equal("Spring", PiggyFarmLevels.Load(json).Pigs.Single().Type);
+    }
+
+    [Fact]
+    public void 规则_弹簧滑行离场与普通猪一致()
+    {
+        // 前方畅通 → 正常滑行离场（弹回只在猪接触时发生，撞墙不弹）
+        var state = LoadState(Spring(1, "Right", (0, 2), (1, 2)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Empty(next.Pigs);
+        Assert.True(Adapter.IsGoal(next));
+    }
+
+    [Fact]
+    public void 规则_弹簧滑行被挡_弹回起始格且阻挡爆炸猪计数递减()
+    {
+        // 弹簧 #1 朝右滑行，(4,2) 处被爆炸猪 #2 挡住 → 接触结算：
+        // 阻挡方爆炸计数 3→2（碰撞事件照常触发），弹簧弹回起始格 (0,2)-(1,2)
+        var layout = string.Join(",",
+            Spring(1, "Right", (0, 2), (1, 2)),
+            Pig(2, "Left", (4, 2), (5, 2), type: "Boom"));
+        var state = LoadState(layout);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        var spring = next.Pigs.Single(p => p.Id == 1);
+        Assert.Equal("Spring", spring.Type);
+        Assert.Equal((0, 2), (spring.Cells[0].X, spring.Cells[0].Y));   // 弹回起始格
+        Assert.Equal((1, 2), (spring.Cells[1].X, spring.Cells[1].Y));
+        Assert.Equal(2, next.Pigs.Single(p => p.Id == 2).Counter);     // 阻挡方爆炸计数递减
+        Assert.False(next.Failed);
+    }
+
+    [Fact]
+    public void 规则_弹簧被普通猪挡住也弹回_普通猪不受位移()
+    {
+        // 弹簧被普通猪挡住 → 弹回起始格；普通猪保持原位（弹簧不推挤阻挡方）
+        var layout = string.Join(",",
+            Spring(1, "Right", (0, 2), (1, 2)),
+            Pig(2, "Left", (4, 2), (5, 2)));
+        var state = LoadState(layout);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        var spring = next.Pigs.Single(p => p.Id == 1);
+        Assert.Equal((0, 2), (spring.Cells[0].X, spring.Cells[0].Y));
+        var other = next.Pigs.Single(p => p.Id == 2);
+        Assert.Equal((4, 2), (other.Cells[0].X, other.Cells[0].Y));    // 阻挡方未位移
+    }
+
+    [Fact]
+    public void 规则_弹簧零距离顶撞_事件触发无位移()
+    {
+        // 起步即碰撞（零距离）：无位移、事件照常触发（阻挡爆炸猪计数递减）
+        var layout = string.Join(",",
+            Spring(1, "Right", (0, 2), (1, 2)),
+            Pig(2, "Left", (2, 2), (3, 2), type: "Boom"));
+        var state = LoadState(layout);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Equal(2, next.Pigs.Single(p => p.Id == 2).Counter);
+        var spring = next.Pigs.Single(p => p.Id == 1);
+        Assert.Equal((0, 2), (spring.Cells[0].X, spring.Cells[0].Y));
+    }
+
+    [Fact]
+    public void 规则_弹簧弹回触发鸭子离场()
+    {
+        // 弹簧顶撞事件 → 鸭子（可达边界）自动离场——弹回虽然无位移，碰撞事件照常广播
+        var layout = string.Join(",",
+            Spring(1, "Right", (0, 2), (1, 2)),
+            Pig(2, "Left", (2, 2), (3, 2)),
+            Duck(4, 5, 5));
+        var state = LoadState(layout);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.DoesNotContain(next.Pigs, p => p.Type == "Duck");
+    }
+
+    [Fact]
+    public void 需求_弹簧猪布点生成_数量与纯度满足()
+    {
+        // 布点式合成：弹簧需求改写模板上的普通猪（无池上限），纯度：未要求类型不出现
+        var result = new PiggyFarmFacade().Compose(
+            """{"band":2}""", "700", new ComposeContext("700", 2, "至少包含70只猪，其中包含5只弹簧猪", 99));
+        Assert.NotNull(result.LevelJson);
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var pig in JsonNode.Parse(result.LevelJson!)?["pigs"]!.AsArray())
+        {
+            var type = pig?["pigType"]?.GetValue<string>() ?? "Normal";
+            counts[type] = counts.GetValueOrDefault(type) + 1;
+        }
+        Assert.True(counts.GetValueOrDefault("Spring") >= 5);
+        Assert.True(counts.GetValueOrDefault("Normal") + counts.GetValueOrDefault("Spring") >= 70);
+        Assert.DoesNotContain("RichPig", counts.Keys);
+        Assert.DoesNotContain("Long", counts.Keys);
+        Assert.DoesNotContain("Boom", counts.Keys);
+        Assert.DoesNotContain("Duck", counts.Keys);
     }
 }

@@ -4,13 +4,13 @@ namespace LevelForge.Adapters.PiggyFarm;
 // 生成需求解析、关卡校验、渲染映射共用同一份名字，避免"爆炸猪/boom/爆炸"各写一套。
 public static class PiggyFarmPigTypes
 {
-    // 主玩法全部 PigType（DataModel/Pig.cs）；v1.2 实现普通滑动家族 + 爆炸计数 + 小黄鸭自动离场 + 丧尸（普通猪+感染）
+    // 主玩法全部 PigType（DataModel/Pig.cs）；v1.3 实现普通滑动家族 + 爆炸计数 + 小黄鸭 + 丧尸（感染）+ 弹簧（弹回原位）
     public static readonly IReadOnlySet<string> Supported =
-        new HashSet<string>(StringComparer.Ordinal) { "Normal", "Long", "RichPig", "Boom", "Duck", "Zombie" };
+        new HashSet<string>(StringComparer.Ordinal) { "Normal", "Long", "RichPig", "Boom", "Duck", "Zombie", "Spring" };
 
     public static readonly IReadOnlySet<string> Unsupported = new HashSet<string>(StringComparer.Ordinal)
     {
-        "Spring", "TimeBoom", "Lock", "Farmer", "Balloon", "RopeLong", "BalloonLong", "IcePig", "ClockworkPig", "Scissors",
+        "TimeBoom", "Lock", "Farmer", "Balloon", "RopeLong", "BalloonLong", "IcePig", "ClockworkPig", "Scissors",
         "Sleep", "Cage", "CageL", "Link", "BackpackSquirrel", "Rabbit", "JokerBox",
     };
 

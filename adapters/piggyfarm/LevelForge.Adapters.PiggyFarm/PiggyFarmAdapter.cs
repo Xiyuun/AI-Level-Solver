@@ -71,7 +71,14 @@ public sealed class PiggyFarmAdapter :
             // 原地顶撞：起步即与阻挡猪碰撞（游戏侧同样触发碰撞回调），随后结算鸭子离场
             return ApplyBump(state, pig);
         }
-        return ApplySlide(state, pig).Next;
+        var (next, slide) = ApplySlide(state, pig);
+        // 弹簧猪：滑行被猪挡住时弹回原位（游戏 SpringPig：碰撞不停止，回弹到起始格/朝向）——
+        // 位移取消但碰撞事件照常触发（阻挡方爆炸计数递减、鸭子重寻路等）
+        if (pig.Type == "Spring" && !slide.Exited)
+        {
+            return ApplyBump(state, pig);
+        }
+        return next;
     }
 
     // 滑行并返回新状态（求解器直接用，避免重复模拟）：离场 = 移除该猪；否则更新占格。
@@ -242,11 +249,16 @@ public sealed class PiggyFarmAdapter :
         {
             return $"点击 {pig.Type} #{pig.Id}（朝{facing}）→ 前方畅通，从{facing}边界离场";
         }
+        var isSpring = pig.Type == "Spring";
         if (slide.Steps == 0)
         {
-            return $"点击 {pig.Type} #{pig.Id}（朝{facing}）→ 原地顶撞 #{slide.BlockerId}（触发碰撞事件）";
+            return isSpring
+                ? $"点击 弹簧猪 #{pig.Id}（朝{facing}）→ 原地顶撞 #{slide.BlockerId}（触发碰撞事件，原地弹回）"
+                : $"点击 {pig.Type} #{pig.Id}（朝{facing}）→ 原地顶撞 #{slide.BlockerId}（触发碰撞事件）";
         }
-        return $"点击 {pig.Type} #{pig.Id}（朝{facing}）→ 滑行 {slide.Steps} 格后被 #{slide.BlockerId} 阻挡停下";
+        return isSpring
+            ? $"点击 弹簧猪 #{pig.Id}（朝{facing}）→ 滑行 {slide.Steps} 格后被 #{slide.BlockerId} 阻挡，弹回起始格"
+            : $"点击 {pig.Type} #{pig.Id}（朝{facing}）→ 滑行 {slide.Steps} 格后被 #{slide.BlockerId} 阻挡停下";
     }
 
     // 场景快照：每个占格一个实体（头格类型 pigHead 带朝向，其余 pigBody）；id 由猪号+坐标组成，执行内稳定

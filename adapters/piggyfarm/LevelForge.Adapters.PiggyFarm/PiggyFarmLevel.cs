@@ -337,6 +337,7 @@ public static class PiggyFarmLevels
             "Normal" => (1, 2),
             "Boom" => (1, 2),
             "Zombie" => (1, 2),
+            "Spring" => (1, 2),
             "Long" => (1, 3),
             "RichPig" => (2, 3),
             "Duck" => (1, 1),
