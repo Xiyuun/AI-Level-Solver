@@ -424,7 +424,7 @@ public sealed class PiggyFarmComposerPreflightTests
         Assert.Empty(facade.ValidateContext(new ComposeContext("801", 2, "至少包含48只猪", 1)));
         var errors = facade.ValidateContext(new ComposeContext("802", 2, "至少包含100只猪", 1));
         Assert.NotEmpty(errors);
-        Assert.Contains(errors, e => e.Contains("97"));
+        Assert.Contains(errors, e => e.Contains("99"));
     }
 
     [Fact]
@@ -468,21 +468,19 @@ public sealed class PiggyFarmComposerRequirementPurityTests
     private static readonly PiggyFarmFacade Facade = new();
 
     [Fact]
-    public void 需求_不结尾猪字的类型被解析_小黄鸭按池容量给可操作错误()
+    public void 需求_不结尾猪字的类型被解析且无模板池上限()
     {
         // 旧正则只认"N只…猪"："30只小黄鸭"整体匹配失败，鸭子需求被静默丢弃（既不产出也不报错）。
-        // 现在小黄鸭已建模：解析成功 → 按池容量给可操作错误（2 档鸭子模板最多 10 只）
-        var errors = Facade.ValidateContext(new ComposeContext("500", 2, "至少包含70只猪，其中包含30只小黄鸭", 1));
-        Assert.Contains(errors, e => e.Contains("小黄鸭") && e.Contains("最多支持 10 只"));
+        // 现在布点式合成：特殊猪数量不受模板池上限约束——30 只小黄鸭在 2 档可放置（改写普通猪）
+        Assert.Empty(Facade.ValidateContext(new ComposeContext("500", 2, "至少包含70只猪，其中包含30只小黄鸭", 1)));
+        Assert.Empty(Facade.ValidateContext(new ComposeContext("500", 2, "至少包含3只丧尸猪", 1)));
     }
 
     [Fact]
-    public void 需求_不支持类型仍如实拒绝_僵尸与兔子()
+    public void 需求_不支持类型仍如实拒绝_弹簧猪()
     {
-        var errors = Facade.ValidateContext(new ComposeContext("500", 2, "至少包含3只僵尸", 1));
-        Assert.Contains(errors, e => e.Contains("丧尸猪") || e.Contains("Zombie"));
-        var errors2 = Facade.ValidateContext(new ComposeContext("500", 3, "加入2只兔子", 1));
-        Assert.Contains(errors2, e => e.Contains("兔子") || e.Contains("Rabbit"));
+        var errors = Facade.ValidateContext(new ComposeContext("500", 2, "至少包含3只弹簧猪", 1));
+        Assert.Contains(errors, e => e.Contains("弹簧猪") || e.Contains("Spring"));
     }
 
     [Fact]
@@ -592,12 +590,16 @@ public sealed class PiggyFarmPigTypeTests
     }
 
     [Fact]
-    public void 类型需求_土豪猪超过模板数量时拒绝()
+    public void 类型需求_土豪猪需求预检不设池上限()
     {
+        // 布点式合成：特殊猪数量不受模板池上限约束——3 只土豪猪（池内有 2 只 natives + 可自由落位）预检通过；
+        // 物理放不下时由 Compose 布点尝试如实失败（Constraint），而非预检一刀切
+        Assert.Empty(new PiggyFarmFacade()
+            .ValidateContext(new ComposeContext("993", 2, "至少包含3只土豪猪", 1)));
+        // 物理容量拒绝口径保留：超出地图总容量仍然拒绝
         var errors = new PiggyFarmFacade()
-            .ValidateContext(new ComposeContext("993", 2, "至少包含3只土豪猪", 1));
+            .ValidateContext(new ComposeContext("993", 2, "至少包含500只土豪猪", 1));
         Assert.NotEmpty(errors);
-        Assert.Contains(errors, e => e.Contains("土豪猪"));
     }
 
     [Fact]

@@ -6,12 +6,14 @@ using LevelForge.Platform.Facades;
 
 namespace LevelForge.Adapters.PiggyFarm;
 
-// 结构化出题器（真实关卡模板 + 对称变体 + 小关模块）：
-//   - 2/3 档：从项目原生关卡模板库取真实关卡（2 档=原生 difficulty 2 且可解的 374；
-//     3 档=原生 difficulty 3 的 19/29/59 + 112 猪密集模板），按种子做 4 种对称变换并重编号；
-//   - 1 档：000001 的 6 猪互锁模块（1~3 个），保持轻量；
-//   - 每条都必须过原生校验器，并由平台难度模型命中目标档（流水线最终判定）。
-// 这样每次生成都是"有真实设计挑战"的关卡，而不是靠解长堆出来的规则网格。
+// 结构化出题器 v2（布点式合成）：
+//   - 模板只提供基础几何（真实关卡 + 对称变体）；需求的特殊猪通过改写模板上的普通猪来"布点"：
+//     1x2 族（普通/爆炸/丧尸）= 原地换型；小黄鸭 = 收缩为 1x1；大长猪 = 脚印延伸一格；土豪猪 = 自由 2x3 落位。
+//   - 特殊猪数量不设模板上限——唯一上限是地图物理容量（12×19）；放不下/不可解/判档不符时如实失败。
+//   - 需求即契约：有类型需求时，未要求的特殊猪从模板上剥离（该候选若因此跌破质量门则换模板重试）；
+//     无类型需求 = 自由生成，出真实关卡原貌（质量门把关）。
+//   - 1 档：000001 的 6 猪互锁模块（1~3 个），保持轻量。
+//   - 每条都必须过原生校验器 + 质量门，并由平台难度模型命中目标档（流水线最终判定）。
 public static class PiggyFarmComposer
 {
     public const string Spec = """
@@ -21,6 +23,7 @@ public static class PiggyFarmComposer
         """;
 
     private const int MapCapacityPigs = 112;   // 12×19 带多朝向/可解的实际上限（物理裸上限 114）
+    private const int MaxAttempts = 24;        // 布点式合成重试次数（模板×对称×布点随机性）
 
     private static readonly (PigFacing Facing, (int X, int Y)[] Cells)[] Module =
     [
@@ -41,29 +44,17 @@ public static class PiggyFarmComposer
         if (errors.Count > 0) return errors;
 
         var templates = band == 2 ? PiggyFarmTemplates.Band2 : PiggyFarmTemplates.Band3;
-        // 动态容量：按"类型子集过滤后可用猪数最大"的模板算（池随批次扩充，常数会过时）
-        var allowed = AllowedTypes(req);
+        // 物理容量：池内最大猪数（特殊猪数量不设模板上限——布点式合成可改写普通猪的类型与脚印）
         var capacity = band switch
         {
             1 => 18,
-            _ => templates
-                .Select(t => CountTypes(t))
-                .Max(c => c.Sum(kv => allowed.Contains(kv.Key) ? kv.Value : 0)),
+            _ => templates.Max(t => CountPigs(t)),
         };
-        if (req.Total > capacity)
+        // 有效总只数 = max(裸"N只猪"，最大单类型需求数)——"500只土豪猪"的 500 计在类型里而非总数里
+        var effectiveTotal = Math.Max(req.Total, req.Types.Count > 0 ? req.Types.Values.Max() : 0);
+        if (effectiveTotal > capacity)
         {
-            errors.Add($"目标 {band} 档可用模板最多容纳 {capacity} 只（3 档最大 {MapCapacityPigs}）；请换档或降低数量");
-        }
-
-        foreach (var (type, count) in req.Types)
-        {
-            var max = type == "Boom"
-                ? templates.Max(t => CountTypes(t).GetValueOrDefault("Normal"))
-                : templates.Max(t => CountTypes(t).GetValueOrDefault(type));
-            if (count > max)
-            {
-                errors.Add($"目标 {band} 档模板最多支持 {max} 只{PiggyFarmPigTypes.DisplayName(type)}；要求 {count} 只，请降低或换档");
-            }
+            errors.Add($"目标 {band} 档物理容量最多 {capacity} 只（3 档最大 {MapCapacityPigs}）；请换档或降低数量");
         }
         return errors;
     }
@@ -102,51 +93,44 @@ public static class PiggyFarmComposer
         }
 
         var templates = band == 2 ? PiggyFarmTemplates.Band2 : PiggyFarmTemplates.Band3;
-        // 类型纯度（候选过滤）：有明确类型需求时，含未要求特殊猪的模板直接不选——保留关卡完整结构
-        //（原地剥猪会破坏设计好的阻挡依赖，产出平凡关卡）。需求即契约：要了什么就出什么。
-        // 无类型需求时不过滤：产出即真实关卡原貌（质量门保证品质，类型多样是关卡丰富度的一部分）。
-        var allowed = AllowedTypes(req);
-        var candidates = templates
-            .Select(t => (Json: t, Types: CountTypes(t)))
-            .Where(c => req.Types.Count == 0 || c.Types.Keys.All(allowed.Contains))
-            .Where(c => required <= c.Types.Sum(kv => kv.Value))
-            .Where(c => req.Types.All(kv => kv.Key == "Boom"
-                ? c.Types.GetValueOrDefault("Normal") >= kv.Value
-                : c.Types.GetValueOrDefault(kv.Key) >= kv.Value))
-            .Select(c => (Json: c.Json, Usable: c.Types.Sum(kv => kv.Value)))
-            .ToList();
-        // 3 档优先真实原生 3 档模板（19/29/59）；112 猪密集/大鸭群模板只在需求 >96 或有类型要求时启用
-        //（类型可得性优先于尺寸偏好：30 只小黄鸭只有 110 猪模板能满足，不能被 ≤96 偏好排除）
-        if (band == 3 && required <= 96 && req.Types.Count == 0)
-        {
-            candidates = candidates.Where(c => c.Usable <= 96).ToList();
-        }
-        if (candidates.Count == 0)
-        {
-            return ComposeResult.Reject($"目标 {band} 档没有满足 {required} 只/类型要求的模板");
-        }
-        // 模板 + 对称 + 随机删猪：不是只换镜像。删 1~8 只后重新求解/判档，
-        // 同一个提示词/难度重新生成会得到不同的关卡（仍保持目标档）。
         var random = new Random(context.Seed ^ 0x5f3759df);
-        for (var attempt = 0; attempt < 16; attempt++)
+        var lastObstacle = "未知";
+        for (var attempt = 0; attempt < MaxAttempts; attempt++)
         {
-            var chosen = candidates[random.Next(candidates.Count)];
+            var chosen = templates[random.Next(templates.Length)];
             var symmetry = random.Next(4);
-            var maxRemove = Math.Max(0, Math.Min(8, chosen.Usable - required));
-            // 有猪类型要求时不删猪，避免把要求的类型删掉；变化交给模板/对称/Boom 转换
-            var remove = context.Seed == 0 && context.SpecialRequirements is null
-                ? 0
-                : req.Types.Count == 0 && maxRemove > 0 ? random.Next(0, maxRemove + 1) : 0;
-            var json = TransformTemplate(chosen.Json, levelNumber, band.Value, symmetry, remove, random);
-            if (req.Types.TryGetValue("Boom", out var boomCount) && boomCount > 0)
+            // 对称变换 + 重编号（保持可解性的结构骨架）
+            var node = JsonNode.Parse(TransformTemplate(chosen, levelNumber, band.Value, symmetry, random))!;
+
+            // 需求布点：剥离未要求特殊猪（纯度）+ 把要求的特殊猪放置到模板上（换型/收缩/延伸/落位）
+            var placeError = req.Types.Count > 0 ? PlaceRequirements(node, req, random) : null;
+            if (placeError is not null)
             {
-                json = ConvertNormalsToBoom(json, boomCount, random);
+                lastObstacle = placeError;
+                continue;
             }
-            if (PiggyFarmLevels.Validate(json).Count > 0) continue;
+
+            var json = node.ToJsonString();
+            var formatErrors = PiggyFarmLevels.Validate(json);
+            if (formatErrors.Count > 0)
+            {
+                lastObstacle = string.Join("；", formatErrors.Take(2));
+                continue;
+            }
+            // 总只数下限核对：产出猪数必须 ≥ 需求（布点只增不减，但模板本身可能小于需求）
+            if (PiggyFarmLevels.Load(json).Pigs.Count < required)
+            {
+                lastObstacle = $"产出 {PiggyFarmLevels.Load(json).Pigs.Count} 只，不足 {required}";
+                continue;
+            }
 
             var outcome = new PiggyFarmSolver().Solve(
                 PiggyFarmLevels.Load(json), TimeSpan.FromSeconds(5), 200_000, CancellationToken.None);
-            if (outcome.Status != SolveStatus.Solved) continue;
+            if (outcome.Status != SolveStatus.Solved)
+            {
+                lastObstacle = "布点后不可解";
+                continue;
+            }
             var weights = PiggyFarmContent.Weights;
             var score = weights.SolutionLengthWeight * outcome.Solution.Count
                       + weights.BranchingWeight * (outcome.Metrics?.AvgBranchingFactor ?? 0);
@@ -155,23 +139,280 @@ public static class PiggyFarmComposer
             {
                 return ComposeResult.Ok(json);
             }
+            lastObstacle = $"布点后判档 {outBand} ≠ 目标 {band}";
         }
 
-        // 有类型要求时不允许"回退到不带该类型的模板"：宁可明确失败，也不静默少猪
         if (req.Types.Count > 0)
         {
+            // 需求即契约：宁可明确失败（说明几何/判档障碍），也不静默少猪或混入未要求类型
             return ComposeResult.Reject(
-                $"模板在 {band} 档无法同时满足类型要求（{string.Join("、", req.Types.Select(kv => $"{PiggyFarmPigTypes.DisplayName(kv.Key)}×{kv.Value}"))}）且可解；请换档或降低要求");
+                $"{MaxAttempts} 次布点尝试未能生成满足要求的 {band} 档关卡（{string.Join("、", req.Types.Select(kv => $"{PiggyFarmPigTypes.DisplayName(kv.Key)}×{kv.Value}"))}；障碍：{lastObstacle}）；请换档、降低数量或调整类型");
         }
 
-        // 兜底：原始模板（不做删猪）至少保证可展示
-        var fallback = TransformTemplate(candidates[0].Json, levelNumber, band.Value, 0, 0, random);
+        // 无类型需求兜底：数量要求仍未满足时如实拒绝（不返回不足额的模板）
+        var fallbackPigs = CountPigs(templates[0]);
+        if (required > fallbackPigs)
+        {
+            return ComposeResult.Reject($"目标 {band} 档物理容量最多 {templates.Max(t => CountPigs(t))} 只；要求 {required} 只，请换档或降低数量");
+        }
+        var fallback = TransformTemplate(templates[0], levelNumber, band.Value, 0, random);
         return PiggyFarmLevels.Validate(fallback).Count > 0
             ? ComposeResult.Fail(PiggyFarmLevels.Validate(fallback))
             : ComposeResult.Ok(fallback);
     }
 
     public static string? DescribeAsCoordinates(string levelJson) => null;
+
+    #region 需求布点
+
+    // 需求布点：剥离未要求类型 → 按"大脚印优先"依次放置要求的特殊猪 → 更新 pigCount。
+    // 返回错误文本（该模板本轮不可用，换模板重试）或 null（成功，level 已就地更新）。
+    private static string? PlaceRequirements(JsonNode level, Requirements req, Random random)
+    {
+        var pigs = level["pigs"]!.AsArray();
+        var width = level["mapWidth"]!.GetValue<int>();
+        var height = level["mapHeight"]!.GetValue<int>();
+        var allowed = AllowedTypes(req);
+
+        // ① 纯度剥离：未要求的特殊猪直接移除（普通猪与要求类型保留）
+        for (var i = pigs.Count - 1; i >= 0; i--)
+        {
+            var type = pigs[i]?["pigType"]?.GetValue<string>() ?? "Normal";
+            if (!allowed.Contains(type)) pigs.RemoveAt(i);
+        }
+        if (pigs.Count < req.Total)
+        {
+            return $"模板剥离未要求类型后只剩 {pigs.Count} 只，不足 {req.Total}";
+        }
+
+        // ② 布点：大脚印优先（土豪猪自由落位 → 大长猪延伸 → 1x2 族换型 → 小黄鸭收缩）
+        foreach (var (type, count) in req.Types.OrderBy(kv => PlacementOrder(kv.Key)))
+        {
+            var remaining = count - CountType(pigs, type);
+            for (var placed = 0; placed < remaining; placed++)
+            {
+                if (!TryPlaceOne(pigs, type, width, height, random))
+                {
+                    return $"模板几何无法放置 {PiggyFarmPigTypes.DisplayName(type)}（已放 {placed + CountType(pigs, type)}，差 {remaining - placed}）";
+                }
+            }
+        }
+
+        // ③ 总只数核对（布点不减少猪数——换型不变、鸭收缩不变、土豪猪 +1；剥离已在上限内核对）
+        if (pigs.Count < req.Total)
+        {
+            return $"布点后只剩 {pigs.Count} 只，不足 {req.Total}";
+        }
+        level["pigCount"] = pigs.Count;
+        return null;
+    }
+
+    // 布点顺序：大脚印优先（2x3 自由落位需要整块空地；1x3 需延伸格；1x2/1x1 随处可放）
+    private static int PlacementOrder(string type) => type switch
+    {
+        "RichPig" => 0,
+        "Long" => 1,
+        "Duck" => 3,
+        _ => 2,   // Normal / Boom / Zombie 等 1x2 族
+    };
+
+    // 放置一只 type 猪成功返回 true；失败 false（调用方按重试/报错处理）
+    private static bool TryPlaceOne(JsonArray pigs, string type, int width, int height, Random random)
+    {
+        var occupied = OccupiedCells(pigs);
+        var maxId = pigs.Max(p => p?["id"]?.GetValue<int>() ?? 0);
+        switch (type)
+        {
+            case "RichPig":
+            {
+                // 自由 2x3/3x2 空白块落位（土豪猪脚印 2×3，随朝向旋转）
+                foreach (var (facing, w, h) in Shuffled([("Up", 2, 3), ("Right", 3, 2)], random))
+                {
+                    var spots = new List<(int X, int Y)[]>();
+                    for (var x = 0; x + w <= width; x++)
+                    {
+                        for (var y = 0; y + h <= height; y++)
+                        {
+                            var block = Rectangle(x, y, w, h);
+                            if (block.Any(occupied.ContainsKey)) continue;
+                            spots.Add(block);
+                        }
+                    }
+                    if (spots.Count == 0) continue;
+                    var chosen = spots[random.Next(spots.Count)];
+                    AppendPig(pigs, maxId + 1, facing, "RichPig", "", chosen);
+                    return true;
+                }
+                return false;
+            }
+            case "Long":
+            {
+                // 大长猪 = 双格猪脚印延伸一格（两端任一端空且界内即可）
+                var twoCell = pigs.Where(p => CellCount(p) == 2).Shuffled(random);
+                foreach (var pig in twoCell)
+                {
+                    var cells = CellsOf(pig);
+                    var axis = cells[0].X == cells[1].X ? "V" : "H";   // 同列=竖排
+                    if (axis == "V")
+                    {
+                        var x = cells[0].X;
+                        var ys = cells.Select(c => c.Y).OrderBy(v => v).ToArray();
+                        var candidates = new[] { (x, ys[0] - 1), (x, ys[^1] + 1) };
+                        foreach (var (cx, cy) in candidates)
+                        {
+                            if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
+                            if (occupied.ContainsKey((cx, cy))) continue;
+                            var facing = cy < ys[0] ? "Up" : "Down";
+                            ConvertPig(pig, facing, "Long", [(cx, cy), .. cells.OrderBy(c => c.Y)]);
+                            return true;
+                        }
+                    }
+                    else
+                    {
+                        var y = cells[0].Y;
+                        var xs = cells.Select(c => c.X).OrderBy(v => v).ToArray();
+                        var candidates = new[] { (xs[0] - 1, y), (xs[^1] + 1, y) };
+                        foreach (var (cx, cy) in candidates)
+                        {
+                            if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
+                            if (occupied.ContainsKey((cx, cy))) continue;
+                            var facing = cx < xs[0] ? "Left" : "Right";
+                            ConvertPig(pig, facing, "Long", [(cx, cy), .. cells.OrderBy(c => c.X)]);
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            case "Duck":
+            {
+                // 小黄鸭 = 1x1：把一只双格猪收缩为单格（猪数不变，腾出一格）
+                var twoCell = pigs.Where(p => CellCount(p) == 2).Shuffled(random);
+                foreach (var pig in twoCell)
+                {
+                    ShrinkToSingleCell(pig, random);
+                    pig["pigType"] = "Duck";
+                    return true;
+                }
+                return false;
+            }
+            default:
+            {
+                // 1x2 族（Normal/Boom/Zombie）：原地换型（脚印不变）
+                var twoCell = pigs.Where(p => CellCount(p) == 2 && TypeOf(p) != type).Shuffled(random);
+                foreach (var pig in twoCell)
+                {
+                    pig["pigType"] = type;
+                    pig["specialInfo"] = type == "Boom" ? "3" : "";
+                    return true;
+                }
+                return false;
+            }
+        }
+    }
+
+    #region 布点小工具
+
+    private static IEnumerable<T> Shuffled<T>(this IEnumerable<T> source, Random random) =>
+        source.OrderBy(_ => random.Next());
+
+    private static (string Facing, int W, int H)[] Shuffled((string Facing, int W, int H)[] source, Random random) =>
+        source.OrderBy(_ => random.Next()).ToArray();
+
+    private static string TypeOf(JsonNode? pig) => pig?["pigType"]?.GetValue<string>() ?? "Normal";
+
+    private static int CellCount(JsonNode? pig) => pig?["occupiedCells"]?.AsArray().Count ?? 0;
+
+    private static List<(int X, int Y)> CellsOf(JsonNode? pig)
+    {
+        var result = new List<(int X, int Y)>();
+        foreach (var cell in pig?["occupiedCells"]?.AsArray() ?? [])
+        {
+            result.Add((cell!["x"]!.GetValue<int>(), cell!["y"]!.GetValue<int>()));
+        }
+        return result;
+    }
+
+    private static Dictionary<(int X, int Y), int> OccupiedCells(JsonArray pigs)
+    {
+        var map = new Dictionary<(int X, int Y), int>();
+        foreach (var pig in pigs)
+        {
+            var id = pig?["id"]?.GetValue<int>() ?? 0;
+            foreach (var cell in CellsOf(pig))
+            {
+                map[cell] = id;
+            }
+        }
+        return map;
+    }
+
+    private static (int X, int Y)[] Rectangle(int x, int y, int w, int h)
+    {
+        var cells = new List<(int X, int Y)>();
+        for (var cx = x; cx < x + w; cx++)
+        {
+            for (var cy = y; cy < y + h; cy++)
+            {
+                cells.Add((cx, cy));
+            }
+        }
+        return cells.ToArray();
+    }
+
+    // 类型换型/改脚印/新建猪统一走这里：写类型 + 朝向 + 脚印 + 清理 specialInfo
+    private static void ConvertPig(JsonNode? pig, string facing, string type, List<(int X, int Y)> cells)
+    {
+        pig!["facing"] = facing;
+        pig["pigType"] = type;
+        pig["specialInfo"] = type == "Boom" ? "3" : "";
+        var arr = new JsonArray();
+        foreach (var (x, y) in cells.OrderBy(c => c.Y).ThenBy(c => c.X))
+        {
+            arr.Add(new JsonObject { ["x"] = x, ["y"] = y });
+        }
+        pig["occupiedCells"] = arr;
+    }
+
+    private static void AppendPig(JsonArray pigs, int id, string facing, string type, string specialInfo, (int X, int Y)[] cells)
+    {
+        var arr = new JsonArray();
+        foreach (var (x, y) in cells)
+        {
+            arr.Add(new JsonObject { ["x"] = x, ["y"] = y });
+        }
+        pigs.Add(new JsonObject
+        {
+            ["id"] = id,
+            ["facing"] = facing,
+            ["pigType"] = type,
+            ["specialInfo"] = specialInfo,
+            ["occupiedCells"] = arr,
+        });
+    }
+
+    // 双格猪收缩为单格：保留随机一端（另一端腾空）
+    private static void ShrinkToSingleCell(JsonNode? pig, Random random)
+    {
+        var cells = pig?["occupiedCells"]!.AsArray();
+        var keep = random.Next(cells!.Count);
+        var keepCell = cells[keep]!.DeepClone();
+        pig!["occupiedCells"] = new JsonArray(keepCell);
+    }
+
+    private static int CountType(JsonArray pigs, string type)
+    {
+        var n = 0;
+        foreach (var pig in pigs)
+        {
+            if ((pig?["pigType"]?.GetValue<string>() ?? "Normal") == type) n++;
+        }
+        return n;
+    }
+
+    #endregion
+
+    #endregion
 
     // 1 档：真实 000001 的 6 猪互锁模块，按种子镜像后平铺 1~3 个槽位并求解验证
     private static ComposeResult BuildModules(string? levelNumber, int count, int seed)
@@ -223,7 +464,7 @@ public static class PiggyFarmComposer
 
     // 真实模板：重设 levelId/difficulty/levelName，按种子做四种对称变换（保持 12×19 与可解性）
     private static string TransformTemplate(
-        string templateJson, string? levelNumber, int band, int symmetry, int removeCount, Random random)
+        string templateJson, string? levelNumber, int band, int symmetry, Random random)
     {
         var node = JsonNode.Parse(templateJson)!;
         var pigs = node["pigs"]!.AsArray();
@@ -252,27 +493,10 @@ public static class PiggyFarmComposer
                 pig["facing"] = facing switch { "Up" => "Down", "Down" => "Up", _ => facing };
             }
         }
-        if (removeCount > 0)
-        {
-            var indices = Enumerable.Range(0, pigs.Count)
-                .OrderBy(_ => random.Next())
-                .Take(removeCount)
-                .OrderByDescending(i => i)
-                .ToList();
-            foreach (var index in indices)
-            {
-                pigs.RemoveAt(index);
-            }
-        }
-        // 类型纯度过滤与删猪都会让 id 出现空洞：统一重编号
-        for (var i = 0; i < pigs.Count; i++)
-        {
-            pigs[i]!["id"] = i;
-        }
         node["levelId"] = int.TryParse(levelNumber, out var parsed) ? parsed : 900 + band;
         node["difficulty"] = band;
         node["pigCount"] = pigs.Count;
-        node["levelName"] = $"v1-template-{band}档-{pigs.Count}猪";
+        node["levelName"] = $"v2-template-{band}档-{pigs.Count}猪";
         return node.ToJsonString();
     }
 
@@ -302,24 +526,6 @@ public static class PiggyFarmComposer
         {
             return 0;
         }
-    }
-
-    // 把模板里随机的 Normal 猪改成 Boom（脚印不变，specialInfo 写剩余爆炸次数），其余类型要求靠模板选择
-    private static string ConvertNormalsToBoom(string json, int count, Random random)
-    {
-        var node = JsonNode.Parse(json)!;
-        var pigs = node["pigs"]!.AsArray();
-        var normals = Enumerable.Range(0, pigs.Count)
-            .Where(i => pigs[i]?["pigType"]?.GetValue<string>() == "Normal")
-            .OrderBy(_ => random.Next())
-            .Take(count)
-            .ToList();
-        foreach (var index in normals)
-        {
-            pigs[index]!["pigType"] = "Boom";
-            pigs[index]!["specialInfo"] = "3";
-        }
-        return node.ToJsonString();
     }
 
     private static IReadOnlyDictionary<string, int> CountTypes(string levelJson)
@@ -363,12 +569,12 @@ public static class PiggyFarmComposer
             var type = PiggyFarmPigTypes.Resolve(typeText);
             if (type is null)
             {
-                errors.Add($"无法识别的猪类型「{typeText}」；请用：普通猪/大长猪/土豪猪/爆炸猪");
+                errors.Add($"无法识别的猪类型「{typeText}」；请用：普通猪/大长猪/土豪猪/爆炸猪/小黄鸭/丧尸猪");
                 continue;
             }
             if (!PiggyFarmPigTypes.Supported.Contains(type))
             {
-                errors.Add($"v1 支持子集之外：{PiggyFarmPigTypes.DisplayName(type)}（{type}）未建模；当前支持普通猪/大长猪/土豪猪/爆炸猪");
+                errors.Add($"v1 支持子集之外：{PiggyFarmPigTypes.DisplayName(type)}（{type}）未建模；当前支持普通猪/大长猪/土豪猪/爆炸猪/小黄鸭/丧尸猪");
                 continue;
             }
             types[type] = Math.Max(types.GetValueOrDefault(type), count);
@@ -391,12 +597,5 @@ public static class PiggyFarmComposer
         {
             return null;
         }
-    }
-
-    private static int ParseRequiredPigs(string? requirements)
-    {
-        if (string.IsNullOrWhiteSpace(requirements)) return 0;
-        var match = Regex.Match(requirements, @"(\d+)\s*只猪");
-        return match.Success && int.TryParse(match.Groups[1].Value, out var n) ? n : 0;
     }
 }

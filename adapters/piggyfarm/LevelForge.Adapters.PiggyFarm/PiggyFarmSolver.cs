@@ -163,10 +163,12 @@ public sealed class PiggyFarmSolver
     }
 
     // 找到一只"沿朝向整条路径畅通、点击即离场"的猪；按 Id 升序取第一只，保证确定性
+    // 小黄鸭不可点击（离场由事件结算的 ResolveDucks 自动处理），不在此列
     private PiggyFarmMove? FindExitMove(PiggyFarmState state)
     {
         foreach (var pig in state.Pigs.OrderBy(p => p.Id))
         {
+            if (pig.Type == "Duck") continue;
             if (PiggyFarmAdapter.CanExitNow(state, pig))
             {
                 return new PiggyFarmMove(pig.Id);
@@ -204,11 +206,13 @@ public sealed class PiggyFarmSolver
     }
 
     // 动作枚举 + 排序（一次性算好下一步与滑行结果，避免求解与排序重复模拟）
+    // 小黄鸭不可点击（离场由 ResolveDucks 在事件结算时自动处理），不产生动作
     private List<MoveCandidate> OrderedLegalMoves(PiggyFarmState state, SearchOrder order)
     {
         var list = new List<MoveCandidate>();
         foreach (var pig in state.Pigs.OrderBy(p => p.Id))
         {
+            if (pig.Type == "Duck") continue;
             if (!PiggyFarmAdapter.CanAdvance(state, pig))
             {
                 continue;
