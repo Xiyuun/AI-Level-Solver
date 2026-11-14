@@ -39,11 +39,12 @@ public sealed class PiggyFarmAdapterTests
     }
 
     [Fact]
-    public void 校验_Boom已纳入支持_其它特殊猪仍按跳过口径()
+    public void 校验_Boom与Zombie已纳入支持_其它特殊猪仍按跳过口径()
     {
         Assert.Empty(PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Boom", (2, 2), (3, 2)))));
-        var errors = PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Zombie", (2, 2), (3, 2))));
-        Assert.Contains(errors, e => e.Contains("v1 支持子集之外") && e.Contains("Zombie"));
+        Assert.Empty(PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Zombie", (2, 2), (3, 2)))));
+        var errors = PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Spring", (2, 2), (3, 2))));
+        Assert.Contains(errors, e => e.Contains("v1 支持子集之外") && e.Contains("Spring"));
     }
 
     [Fact]
@@ -281,9 +282,9 @@ public sealed class PiggyFarmAdapterTests
             unsupported++;
             Assert.Contains(errors, e => e.Contains("v1 支持子集之外"));
         }
-        // v1.1 子集：Normal/Long/RichPig/Boom/Duck、无升降梯、无动态兔子 —— 本语料实测 163 关
-        Assert.Equal(163, accepted);
-        Assert.Equal(336, unsupported);
+        // v1.1 子集：Normal/Long/RichPig/Boom/Duck、无升降梯、无动态兔子 —— 本语料实测 175 关
+        Assert.Equal(175, accepted);
+        Assert.Equal(324, unsupported);
     }
 
     #endregion
@@ -776,5 +777,97 @@ public sealed class PiggyFarmDuckRuleTests
         var next = Adapter.ApplyMove(state, new PiggyFarmMove(2));   // 爆炸猪顶撞 → 自身计数 -1
         Assert.False(next.Failed);
         Assert.Equal(2, next.Pigs.Single(p => p.Id == 2).Counter);
+    }
+}
+
+// 丧尸猪规则（PigManager.FindConvertibleNormal/ConvertNormalToZombie 契约）：
+// 丧尸 = 普通猪控制器 + 感染标记——走位/碰撞/离场/清场完全一致；每次已结算接触中
+// 普通猪转为丧尸（仅影响结算奖励，不影响胜负）；丧尸撞丧尸不感染；转化后的丧尸继续感染
+public sealed class PiggyFarmZombieRuleTests
+{
+    private static readonly PiggyFarmAdapter Adapter = new();
+
+    private static string Zombie(int id, string facing, (int X, int Y) a, (int X, int Y) b) =>
+        $$"""{"id":{{id}},"facing":"{{facing}}","pigType":"Zombie","specialInfo":"","occupiedCells":[{"x":{{a.X}},"y":{{a.Y}}},{"x":{{b.X}},"y":{{b.Y}}}]}""";
+
+    private static string Pig(int id, string facing, (int X, int Y) a, (int X, int Y) b, string type = "Normal") =>
+        $$"""{"id":{{id}},"facing":"{{facing}}","pigType":"{{type}}","specialInfo":"3","occupiedCells":[{"x":{{a.X}},"y":{{a.Y}}},{"x":{{b.X}},"y":{{b.Y}}}]}""";
+
+    private static string Level(string pigsJson, int width = 8, int height = 6)
+    {
+        var count = JsonNode.Parse("[" + pigsJson + "]")!.AsArray().Count;
+        return $$"""{"levelId":960,"difficulty":2,"levelName":"zombie","mapWidth":{{width}},"mapHeight":{{height}},"pigCount":{{count}},"pigs":[{{pigsJson}}],"terrainElements":[]}""";
+    }
+
+    private static PiggyFarmState LoadState(string pigsJson) =>
+        Adapter.LoadLevel(PiggyFarmLevels.Load(Level(pigsJson)));
+
+    [Fact]
+    public void 解析_Zombie脚印与普通猪同形合法()
+    {
+        var json = Level(Zombie(1, "Right", (0, 2), (1, 2)));
+        Assert.Empty(new PiggyFarmFacade().FormatErrors(json));
+        Assert.Equal("Zombie", PiggyFarmLevels.Load(json).Pigs.Single().Type);
+    }
+
+    [Fact]
+    public void 规则_丧尸走位离场与普通猪完全一致()
+    {
+        // 丧尸朝右、前方畅通 → 滑行出右边界；丧尸计入清场
+        var state = LoadState(Zombie(1, "Right", (0, 2), (1, 2)));
+        Assert.Contains(new PiggyFarmMove(1), Adapter.GetLegalMoves(state));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Empty(next.Pigs);
+        Assert.True(Adapter.IsGoal(next));
+    }
+
+    [Fact]
+    public void 规则_普通猪滑行撞上丧尸_普通猪被感染()
+    {
+        // #1 普通猪朝右滑行，(3,2) 处被丧尸 #2 挡住 → 接触结算 → #1 转为丧尸
+        var state = LoadState(Pig(1, "Right", (0, 2), (1, 2)) + "," + Zombie(2, "Right", (3, 2), (4, 2)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Equal("Zombie", next.Pigs.Single(p => p.Id == 1).Type);
+        Assert.Equal("Zombie", next.Pigs.Single(p => p.Id == 2).Type);
+        Assert.False(next.Failed);
+    }
+
+    [Fact]
+    public void 规则_丧尸滑行撞上普通猪_普通猪被感染()
+    {
+        // 丧尸 #1 朝右滑行撞上普通猪 #2 → #2 转为丧尸（且不判负——感染只影响奖励）
+        var state = LoadState(Zombie(1, "Right", (0, 2), (1, 2)) + "," + Pig(2, "Right", (3, 2), (4, 2)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Equal("Zombie", next.Pigs.Single(p => p.Id == 2).Type);
+        Assert.False(next.Failed);
+    }
+
+    [Fact]
+    public void 规则_丧尸撞丧尸不感染_普通撞普通不感染()
+    {
+        // 两只丧尸贴脸互撞：无普通猪参与 → 无转化可言，类型保持
+        var zState = LoadState(Zombie(1, "Right", (0, 2), (1, 2)) + "," + Zombie(2, "Left", (2, 2), (3, 2)));
+        var zNext = Adapter.ApplyMove(zState, new PiggyFarmMove(1));
+        Assert.All(zNext.Pigs, p => Assert.Equal("Zombie", p.Type));
+        // 两只普通猪贴脸互撞：无丧尸参与 → 类型保持
+        var nState = LoadState(Pig(1, "Right", (0, 2), (1, 2)) + "," + Pig(2, "Left", (2, 2), (3, 2)));
+        var nNext = Adapter.ApplyMove(nState, new PiggyFarmMove(1));
+        Assert.All(nNext.Pigs, p => Assert.Equal("Normal", p.Type));
+    }
+
+    [Fact]
+    public void 规则_感染是链式的_转化后的丧尸继续感染()
+    {
+        // 一排三只（宽 8）：丧尸 #1(0,2)-(1,2) 朝右 → 普通猪 #2(3,2)-(4,2) → 普通猪 #3(5,2)-(6,2)
+        // 第一步 #1 滑行撞 #2 → #2 感染；第二步 #2 朝右被 #3 挡（顶撞）→ #3 感染
+        var state = LoadState(
+            Zombie(1, "Right", (0, 2), (1, 2)) + "," +
+            Pig(2, "Right", (3, 2), (4, 2)) + "," +
+            Pig(3, "Right", (5, 2), (6, 2)));
+        var after1 = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Equal("Zombie", after1.Pigs.Single(p => p.Id == 2).Type);
+        Assert.Equal("Normal", after1.Pigs.Single(p => p.Id == 3).Type);
+        var after2 = Adapter.ApplyMove(after1, new PiggyFarmMove(2));   // #2 被挡 → 顶撞 #3 → 感染
+        Assert.Equal("Zombie", after2.Pigs.Single(p => p.Id == 3).Type);
     }
 }

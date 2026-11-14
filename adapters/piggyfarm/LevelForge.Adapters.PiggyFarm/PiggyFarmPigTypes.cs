@@ -4,14 +4,14 @@ namespace LevelForge.Adapters.PiggyFarm;
 // 生成需求解析、关卡校验、渲染映射共用同一份名字，避免"爆炸猪/boom/爆炸"各写一套。
 public static class PiggyFarmPigTypes
 {
-    // 主玩法全部 PigType（DataModel/Pig.cs）；v1.1 实现普通滑动家族 + 爆炸计数 + 小黄鸭自动离场
+    // 主玩法全部 PigType（DataModel/Pig.cs）；v1.2 实现普通滑动家族 + 爆炸计数 + 小黄鸭自动离场 + 丧尸（普通猪+感染）
     public static readonly IReadOnlySet<string> Supported =
-        new HashSet<string>(StringComparer.Ordinal) { "Normal", "Long", "RichPig", "Boom", "Duck" };
+        new HashSet<string>(StringComparer.Ordinal) { "Normal", "Long", "RichPig", "Boom", "Duck", "Zombie" };
 
     public static readonly IReadOnlySet<string> Unsupported = new HashSet<string>(StringComparer.Ordinal)
     {
-        "Spring", "TimeBoom", "Lock", "Farmer", "Balloon", "RopeLong", "Scissors",
-        "Sleep", "Cage", "CageL", "Link", "Zombie", "BackpackSquirrel", "Rabbit", "JokerBox",
+        "Spring", "TimeBoom", "Lock", "Farmer", "Balloon", "RopeLong", "BalloonLong", "IcePig", "ClockworkPig", "Scissors",
+        "Sleep", "Cage", "CageL", "Link", "BackpackSquirrel", "Rabbit", "JokerBox",
     };
 
     // 中文/英文别名 → 规范类型名（大小写不敏感）
@@ -38,6 +38,9 @@ public static class PiggyFarmPigTypes
         ["丧尸猪"] = "Zombie", ["僵尸猪"] = "Zombie", ["丧尸"] = "Zombie", ["僵尸"] = "Zombie", ["Zombie"] = "Zombie",
         ["背包松鼠"] = "BackpackSquirrel", ["松鼠"] = "BackpackSquirrel", ["Squirrel"] = "BackpackSquirrel", ["BackpackSquirrel"] = "BackpackSquirrel",
         ["兔子"] = "Rabbit", ["兔"] = "Rabbit", ["Rabbit"] = "Rabbit",
+        ["冰猪"] = "IcePig", ["冰冻猪"] = "IcePig", ["IcePig"] = "IcePig",
+        ["发条猪"] = "ClockworkPig", ["发条"] = "ClockworkPig", ["ClockworkPig"] = "ClockworkPig",
+        ["气球长猪"] = "BalloonLong", ["气球长"] = "BalloonLong", ["BalloonLong"] = "BalloonLong",
     };
 
     public static string? Resolve(string? text)
@@ -46,13 +49,16 @@ public static class PiggyFarmPigTypes
         if (string.IsNullOrEmpty(key)) return null;
         if (Alias.TryGetValue(key, out var exact)) return exact;
 
-        // 常见中文变体/组合词兜底：先判"定时炸弹"再判"炸弹"，避免 TimeBoom 被吃成 Boom
+        // 常见中文变体/组合词兜底：先判"定时炸弹"再判"炸弹"，避免 TimeBoom 被吃成 Boom；"气球长"先于"气球"
         if (key.Contains("定时") && (key.Contains("炸弹") || key.Contains("爆炸"))) return "TimeBoom";
         if (key.Contains("炸弹") || key.Contains("爆炸")) return "Boom";
         if (key.Contains("弹簧")) return "Spring";
         if (key.Contains("锁")) return "Lock";
         if (key.Contains("农场主")) return "Farmer";
+        if (key.Contains("气球长")) return "BalloonLong";
         if (key.Contains("气球")) return "Balloon";
+        if (key.Contains("冰")) return "IcePig";
+        if (key.Contains("发条")) return "ClockworkPig";
         if (key.Contains("捆绑") || key.Contains("绳子")) return "RopeLong";
         if (key.Contains("剪刀")) return "Scissors";
         if (key.Contains("鸭")) return "Duck";
@@ -89,6 +95,9 @@ public static class PiggyFarmPigTypes
         "Zombie" => "丧尸猪",
         "BackpackSquirrel" => "背包松鼠",
         "Rabbit" => "兔子",
+        "IcePig" => "冰猪",
+        "ClockworkPig" => "发条猪",
+        "BalloonLong" => "气球长猪",
         _ => type,
     };
 }

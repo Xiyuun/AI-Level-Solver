@@ -112,13 +112,13 @@ public sealed class PiggyFarmAdapter :
                 }
                 pigs.Add(other);
             }
-            next = state with { Pigs = pigs.OrderBy(p => p.Id).ToArray() };
+            next = ApplyInfection(state with { Pigs = pigs.OrderBy(p => p.Id).ToArray() }, pig.Id, slide.BlockerId ?? -1);
         }
         // 结算小黄鸭自动离场（离场/碰撞事件都会触发）；最后统一落 Failed 标记
         return (ResolveDucks(next) with { Failed = failed }, slide);
     }
 
-    // 原地顶撞：起步即碰撞阻挡猪（无位移）。爆炸计数双方结算；随后结算鸭子离场。
+    // 原地顶撞：起步即碰撞阻挡猪（无位移）。爆炸计数双方结算 + 丧尸感染判定；随后结算鸭子离场。
     public static PiggyFarmState ApplyBump(PiggyFarmState state, PiggyFarmPig pig)
     {
         var slide = SimulateSlide(state, pig);   // 只为取 BlockerId（Steps 必为 0）
@@ -135,8 +135,28 @@ public sealed class PiggyFarmAdapter :
             }
             pigs.Add(other);
         }
-        var next = ResolveDucks(state with { Pigs = pigs.OrderBy(p => p.Id).ToArray() }) with { Failed = failed };
-        return next;
+        var next = ApplyInfection(state with { Pigs = pigs.OrderBy(p => p.Id).ToArray() }, pig.Id, slide.BlockerId ?? -1);
+        var result = ResolveDucks(next) with { Failed = failed };
+        return result;
+    }
+
+    // 丧尸感染（游戏 PigManager.FindConvertibleNormal/ConvertNormalToZombie）：每次已结算接触中，
+    // 普通猪与丧尸猪相触 → 普通猪转为丧尸（同控制器同占格，行为与普通猪完全一致，仅影响结算奖励）。
+    // 无接触不感染；丧尸撞丧尸、普通撞普通均不感染。
+    private static PiggyFarmState ApplyInfection(PiggyFarmState state, int idA, int idB)
+    {
+        if (idA == idB) return state;
+        var a = state.Pigs.FirstOrDefault(p => p.Id == idA);
+        var b = state.Pigs.FirstOrDefault(p => p.Id == idB);
+        if (a is null || b is null) return state;
+        var normalId = a.Type == "Zombie" && b.Type == "Normal" ? b.Id
+            : b.Type == "Zombie" && a.Type == "Normal" ? a.Id
+            : -1;
+        if (normalId < 0) return state;
+        return state with
+        {
+            Pigs = state.Pigs.Select(p => p.Id == normalId ? p with { Type = "Zombie" } : p).OrderBy(p => p.Id).ToArray()
+        };
     }
 
     // 小黄鸭自动离场（游戏 Duck.cs：任一离场/碰撞事件后，站立的鸭子各自 BFS 寻路到边界，可达即离场）：
