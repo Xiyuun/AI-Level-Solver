@@ -115,12 +115,14 @@ public static class PiggyFarmComposer
             if (formatErrors.Count > 0)
             {
                 lastObstacle = string.Join("；", formatErrors.Take(2));
+                Console.Error.WriteLine($"[compose] attempt {attempt}: obstacle={lastObstacle}");
                 continue;
             }
             // 总只数下限核对：产出猪数必须 ≥ 需求（布点只增不减，但模板本身可能小于需求）
             if (PiggyFarmLevels.Load(json).Pigs.Count < required)
             {
                 lastObstacle = $"产出 {PiggyFarmLevels.Load(json).Pigs.Count} 只，不足 {required}";
+                Console.Error.WriteLine($"[compose] attempt {attempt}: obstacle={lastObstacle}");
                 continue;
             }
 
@@ -128,7 +130,7 @@ public static class PiggyFarmComposer
                 PiggyFarmLevels.Load(json), TimeSpan.FromSeconds(5), 200_000, CancellationToken.None);
             if (outcome.Status != SolveStatus.Solved)
             {
-                lastObstacle = "布点后不可解";
+                lastObstacle = "布点后不可解(" + outcome.Status + ", len=" + outcome.Solution.Count + ")";
                 continue;
             }
             var weights = PiggyFarmContent.Weights;
@@ -185,6 +187,19 @@ public static class PiggyFarmComposer
             return $"模板剥离未要求类型后只剩 {pigs.Count} 只，不足 {req.Total}";
         }
 
+        // ①b 大批量气球（≥10）：区域气球墙布点——顶部整宽区域横排气球（朝右，解绳后整排依次向右
+        //    离场），同色剪刀 3 只放区域右缘（出口畅通，先于解绳离场）。随机散布 30 只系留气球会
+        //    把剪刀困死在墙里导致不可解——真实关卡设计都是气球成排靠边 + 剪刀留走廊。
+        var balloonDemand = req.Types.FirstOrDefault(kv => kv.Key is "Balloon" or "BalloonLong" && kv.Value >= 10);
+        if (balloonDemand.Key is not null)
+        {
+            var wallError = PlaceBalloonWall(level, pigs, balloonDemand.Key, balloonDemand.Value, width, height);
+            if (wallError is not null)
+            {
+                return wallError;
+            }
+        }
+
         // ② 布点：大脚印优先（土豪猪自由落位 → 大长猪延伸 → 1x2 族换型 → 小黄鸭收缩）
         foreach (var (type, count) in req.Types.OrderBy(kv => PlacementOrder(kv.Key)))
         {
@@ -198,7 +213,32 @@ public static class PiggyFarmComposer
             }
         }
 
-        // ③ 总只数核对（布点不减少猪数——换型不变、鸭收缩不变、土豪猪 +1；剥离已在上限内核对）
+        // ②b 气球配套剪刀：绳只能被同色剪刀"离场"剪断（Balloon 3 绳 / BalloonLong 5 绳，每根一次同色
+        //    剪刀离场）——按色补足剪刀猪（改写普通猪），保证布点后的关卡可解
+        var ropeNeed = new Dictionary<int, int>();   // color -> 该色气球需要的同色剪刀离场次数
+        foreach (var pig in pigs)
+        {
+            var ropes = TypeOf(pig) == "Balloon" ? 3 : TypeOf(pig) == "BalloonLong" ? 5 : 0;
+            if (ropes > 0)
+            {
+                var color = ColorOf(pig);
+                if (color < 0) return "气球猪颜色未就绪（specialInfo 非法）——无法保证可解";
+                ropeNeed[color] = Math.Max(ropeNeed.GetValueOrDefault(color), ropes);
+            }
+        }
+        foreach (var (color, need) in ropeNeed)
+        {
+            var have = pigs.Count(p => TypeOf(p) == "Scissors" && ColorOf(p) == color);
+            for (var i = have; i < need; i++)
+            {
+                if (!TryPlaceOne(pigs, "Scissors", width, height, random, color))
+                {
+                    return $"普通猪不足以为 {need} 根绳补足 {color} 色剪刀猪";
+                }
+            }
+        }
+
+        // ③ 总只数核对 + pigCount 同步（换型不变、鸭收缩不变、土豪猪 +1；剥离已在上限内核对）
         if (pigs.Count < req.Total)
         {
             return $"布点后只剩 {pigs.Count} 只，不足 {req.Total}";
@@ -207,17 +247,70 @@ public static class PiggyFarmComposer
         return null;
     }
 
+    // 大批量气球区域墙：顶部 rows 行清空 → 右缘放 3 只同色剪刀（贴墙，离场路径天生畅通）→
+    // 其余格按行两两一组横排填充气球（朝右）。解绳次序：3 只剪刀先依次离场（每次该色全部气球
+    // 各减 1 绳）→ 绳尽解锁 → 气球整排向右依次离场 → 区域外普通猪按原互锁解走位。
+    private static string? PlaceBalloonWall(
+        JsonNode level, JsonArray pigs, string balloonType, int n, int width, int height)
+    {
+        var ropePer = balloonType == "BalloonLong" ? 5 : 3;
+        var rows = (int)Math.Ceiling((n * 2 + 6) / (double)width);   // 气球格 + 3 只剪刀位
+        if (rows * width < n * 2 + 6 || rows >= height)
+        {
+            return $"地图高度不足以容纳 {n} 只{PiggyFarmPigTypes.DisplayName(balloonType)}气球墙";
+        }
+
+        // 清空区域：与顶部 rows 行相交的猪全部移除
+        for (var i = pigs.Count - 1; i >= 0; i--)
+        {
+            if (CellsOf(pigs[i]).Any(c => c.Y < rows)) pigs.RemoveAt(i);
+        }
+
+        // 3 只同色剪刀放区域右缘（最后 3 行的右端 1x2），朝右贴墙 → 离场路径畅通
+        for (var s = 0; s < 3; s++)
+        {
+            var y = rows - 1 - s;
+            AppendPig(pigs, 1000 + s, "Right", "Scissors", "0", [(width - 2, y), (width - 1, y)]);
+        }
+        var scissorCells = new HashSet<(int X, int Y)>();
+        for (var s = 0; s < 3; s++)
+        {
+            scissorCells.Add((width - 2, rows - 1 - s));
+            scissorCells.Add((width - 1, rows - 1 - s));
+        }
+
+        // 气球按行两两一组填充剩余区域格（朝右），跳过剪刀占格
+        var placed = 0;
+        for (var y = 0; y < rows && placed < n; y++)
+        {
+            for (var x = 0; x + 1 < width && placed < n; x += 2)
+            {
+                if (scissorCells.Contains((x, y)) || scissorCells.Contains((x + 1, y))) continue;
+                AppendPig(pigs, 1010 + placed, "Right", balloonType, "0", [(x, y), (x + 1, y)]);
+                placed++;
+            }
+        }
+        if (placed < n)
+        {
+            return $"区域容量不足：只能放置 {placed}/{n} 只{PiggyFarmPigTypes.DisplayName(balloonType)}";
+        }
+
+        level["pigCount"] = pigs.Count;
+        return null;
+    }
+
     // 布点顺序：大脚印优先（2x3 自由落位需要整块空地；1x3 需延伸格；1x2/1x1 随处可放）
     private static int PlacementOrder(string type) => type switch
     {
         "RichPig" => 0,
-        "Long" => 1,
+        "Long" or "BalloonLong" => 1,
         "Duck" => 3,
-        _ => 2,   // Normal / Boom / Zombie 等 1x2 族
+        _ => 2,   // Normal / Boom / Zombie / Spring / Scissors / Balloon 等 1x2 族
     };
 
     // 放置一只 type 猪成功返回 true；失败 false（调用方按重试/报错处理）
-    private static bool TryPlaceOne(JsonArray pigs, string type, int width, int height, Random random)
+    // color：剪刀/气球/气球长猪的颜色索引（0黄/1绿/2蓝），写进 specialInfo 与游戏口径一致
+    private static bool TryPlaceOne(JsonArray pigs, string type, int width, int height, Random random, int color = 0)
     {
         var occupied = OccupiedCells(pigs);
         var maxId = pigs.Max(p => p?["id"]?.GetValue<int>() ?? 0);
@@ -292,18 +385,37 @@ public static class PiggyFarmComposer
                 {
                     ShrinkToSingleCell(pig, random);
                     pig["pigType"] = "Duck";
+                    pig["specialInfo"] = "";
+                    return true;
+                }
+                return false;
+            }
+            case "BalloonLong":
+            {
+                // 气球长猪 = 1x3 三格猪原地换型（5 绳系留；脚印保持）
+                var threeCell = pigs.Where(p => CellCount(p) == 3 && TypeOf(p) != "BalloonLong").Shuffled(random);
+                foreach (var pig in threeCell)
+                {
+                    pig["pigType"] = "BalloonLong";
+                    pig["specialInfo"] = color.ToString();   // 绳色；绳数 5 为类型常量非关卡字段
                     return true;
                 }
                 return false;
             }
             default:
             {
-                // 1x2 族（Normal/Boom/Zombie）：原地换型（脚印不变）
+                // 1x2 族（Normal/Boom/Zombie/Spring/Scissors/Balloon）：原地换型（脚印不变）
+                // 气球/剪刀写入绳色/剪刀色；Boom 写计数 3
                 var twoCell = pigs.Where(p => CellCount(p) == 2 && TypeOf(p) != type).Shuffled(random);
                 foreach (var pig in twoCell)
                 {
                     pig["pigType"] = type;
-                    pig["specialInfo"] = type == "Boom" ? "3" : "";
+                    pig["specialInfo"] = type switch
+                    {
+                        "Boom" => "3",
+                        "Scissors" or "Balloon" => color.ToString(),
+                        _ => "",
+                    };
                     return true;
                 }
                 return false;
@@ -320,6 +432,12 @@ public static class PiggyFarmComposer
         source.OrderBy(_ => random.Next()).ToArray();
 
     private static string TypeOf(JsonNode? pig) => pig?["pigType"]?.GetValue<string>() ?? "Normal";
+
+    private static int ColorOf(JsonNode? pig)
+    {
+        var v = pig?["specialInfo"]?.GetValue<string>();
+        return int.TryParse(v?.Trim(), out var n) && n is >= 0 and <= 2 ? n : -1;
+    }
 
     private static int CellCount(JsonNode? pig) => pig?["occupiedCells"]?.AsArray().Count ?? 0;
 

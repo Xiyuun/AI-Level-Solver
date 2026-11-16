@@ -15,12 +15,14 @@ public enum PigFacing
 public readonly record struct GridCell(int X, int Y);
 
 // 单只猪的静态定义（地面层）：occupiedCells 是该项目原生脚印，长条猪/土豪猪是多格
+// Color：剪刀猪（剪刀色 0黄/1绿/2蓝）与气球猪（绳色）的颜色标记；-1 = 未就绪/不适用
 public sealed record PiggyFarmLevelPig(
     int Id,
     PigFacing Facing,
     string Type,
     IReadOnlyList<GridCell> Cells,
-    int Counter = 0);   // Boom 剩余爆炸次数；其它类型为 0
+    int Counter = 0,   // Boom 剩余爆炸次数；其它类型为 0
+    int Color = -1);
 
 // 原生关卡：ClassicMode 编辑源 JSON（Assets/Main/LevelEditor/Luban~/Datas/Levels/*.json）
 // 平台直通项目格式，不引入中间格式；本类型只保留规则需要的字段
@@ -272,6 +274,20 @@ public static class PiggyFarmLevels
             }
         }
 
+        // 剪刀/气球/气球长猪的 specialInfo 是颜色索引（0黄/1绿/2蓝，游戏 PigColorAccessoryUtil 同口径）；
+        // 非法值游戏侧按"颜色未就绪"容忍（剪刀永远剪不到、气球永远解不开绳），这里同样容忍为 -1
+        var color = -1;
+        if (type is "Scissors" or "Balloon" or "BalloonLong")
+        {
+            var info = element.TryGetProperty("specialInfo", out var infoEl) && infoEl.ValueKind == JsonValueKind.String
+                ? infoEl.GetString() ?? ""
+                : "";
+            if (int.TryParse(info.Trim(), out var parsedColor) && parsedColor is >= 0 and <= 2)
+            {
+                color = parsedColor;
+            }
+        }
+
         var cells = new List<GridCell>();
         if (!element.TryGetProperty("occupiedCells", out var cellsEl) || cellsEl.ValueKind != JsonValueKind.Array)
         {
@@ -338,6 +354,9 @@ public static class PiggyFarmLevels
             "Boom" => (1, 2),
             "Zombie" => (1, 2),
             "Spring" => (1, 2),
+            "Scissors" => (1, 2),
+            "Balloon" => (1, 2),
+            "BalloonLong" => (1, 3),
             "Long" => (1, 3),
             "RichPig" => (2, 3),
             "Duck" => (1, 1),
@@ -358,7 +377,8 @@ public static class PiggyFarmLevels
         return new PiggyFarmLevelPig(
             id ?? -1, facing, type,
             cells.OrderBy(c => c.Y).ThenBy(c => c.X).ToArray(),
-            counter);
+            counter,
+            color);
     }
 
     // 地面猪占格互斥：同格出现两只猪 = 关卡数据错误（铁笼叠放已在子集外整体拒绝）

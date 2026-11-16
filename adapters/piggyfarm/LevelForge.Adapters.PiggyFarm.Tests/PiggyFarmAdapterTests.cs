@@ -39,12 +39,12 @@ public sealed class PiggyFarmAdapterTests
     }
 
     [Fact]
-    public void 校验_Boom与Zombie已纳入支持_其它特殊猪仍按跳过口径()
+    public void 校验_Boom与Zombie与Scissors已纳入支持_其它特殊猪仍按跳过口径()
     {
         Assert.Empty(PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Boom", (2, 2), (3, 2)))));
         Assert.Empty(PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Zombie", (2, 2), (3, 2)))));
-        var errors = PiggyFarmLevels.Validate(Level(Pig(0, "Left", "Scissors", (2, 2), (3, 2))));
-        Assert.Contains(errors, e => e.Contains("v1 支持子集之外") && e.Contains("Scissors"));
+        var errors = PiggyFarmLevels.Validate(Level(Pig(0, "Left", "IcePig", (2, 2), (3, 2))));
+        Assert.Contains(errors, e => e.Contains("v1 支持子集之外") && e.Contains("IcePig"));
     }
 
     [Fact]
@@ -282,9 +282,9 @@ public sealed class PiggyFarmAdapterTests
             unsupported++;
             Assert.Contains(errors, e => e.Contains("v1 支持子集之外"));
         }
-        // v1.1 子集：Normal/Long/RichPig/Boom/Duck、无升降梯、无动态兔子 —— 本语料实测 264 关
-        Assert.Equal(264, accepted);
-        Assert.Equal(235, unsupported);
+        // v1.1 子集：Normal/Long/RichPig/Boom/Duck、无升降梯、无动态兔子 —— 本语料实测 301 关
+        Assert.Equal(301, accepted);
+        Assert.Equal(198, unsupported);
     }
 
     #endregion
@@ -336,7 +336,7 @@ public sealed class PiggyFarmComposerTests
     {
         var facade = new PiggyFarmFacade();
         var result = facade.Compose($$"""{"band":{{band}}}""", "501");
-        Assert.NotNull(result.LevelJson);
+        Assert.True(result.LevelJson is not null, "errors=" + string.Join("|", result.Errors));
         Assert.Empty(result.Errors);
         return (facade, result.LevelJson!);
     }
@@ -477,10 +477,10 @@ public sealed class PiggyFarmComposerRequirementPurityTests
     }
 
     [Fact]
-    public void 需求_不支持类型仍如实拒绝_剪刀猪()
+    public void 需求_不支持类型仍如实拒绝_冰猪()
     {
-        var errors = Facade.ValidateContext(new ComposeContext("500", 2, "至少包含3只剪刀猪", 1));
-        Assert.Contains(errors, e => e.Contains("剪刀猪") || e.Contains("Scissors"));
+        var errors = Facade.ValidateContext(new ComposeContext("500", 2, "至少包含3只冰猪", 1));
+        Assert.Contains(errors, e => e.Contains("冰猪") || e.Contains("IcePig"));
     }
 
     [Fact]
@@ -503,7 +503,7 @@ public sealed class PiggyFarmComposerRequirementPurityTests
         // 需求即契约：要了 RichPig×2 → 候选过滤只选类型 ⊆ {普通,土豪} 的模板（Level374）→
         // 输出不含大长猪/爆炸猪/小黄鸭
         var result = Facade.Compose("""{"band":2}""", "501", new ComposeContext("501", 2, "至少包含70只猪，其中包含2只土豪猪", 777));
-        Assert.NotNull(result.LevelJson);
+        Assert.True(result.LevelJson is not null, "errors=" + string.Join("|", result.Errors));
         Assert.Empty(result.Errors);
         var counts = ParseTypes(result.LevelJson!);
         Assert.True(counts.GetValueOrDefault("RichPig") >= 2);
@@ -518,7 +518,7 @@ public sealed class PiggyFarmComposerRequirementPurityTests
     {
         // band3 鸭子模板 000359：110 猪含恰好 30 只小黄鸭
         var result = Facade.Compose("""{"band":3}""", "502", new ComposeContext("502", 3, "至少包含100只猪，其中包含30只小黄鸭", 42));
-        Assert.NotNull(result.LevelJson);
+        Assert.True(result.LevelJson is not null, "errors=" + string.Join("|", result.Errors));
         var counts = ParseTypes(result.LevelJson!);
         Assert.True(counts.GetValueOrDefault("Duck") >= 30);
         Assert.True(counts.GetValueOrDefault("Normal") >= 70);
@@ -528,7 +528,7 @@ public sealed class PiggyFarmComposerRequirementPurityTests
     public void 类型纯度_要求的土豪猪按需求保留()
     {
         var result = Facade.Compose("""{"band":2}""", "501", new ComposeContext("501", 2, "至少包含2只土豪猪", 777));
-        Assert.NotNull(result.LevelJson);
+        Assert.True(result.LevelJson is not null, "errors=" + string.Join("|", result.Errors));
         Assert.True(ParseTypes(result.LevelJson!).GetValueOrDefault("RichPig") >= 2);
     }
 
@@ -608,7 +608,7 @@ public sealed class PiggyFarmPigTypeTests
         // band3：Dense112 纯普通猪模板 ⊆ {普通,爆炸} → 转换 3 只普通猪为爆炸猪 → 原生密集设计仍判 3 档
         var facade = new PiggyFarmFacade();
         var result = facade.Compose("{}", "994", new ComposeContext("994", 3, "至少包含50只猪，其中至少包含3只爆炸猪", 7));
-        Assert.NotNull(result.LevelJson);
+        Assert.True(result.LevelJson is not null, "errors=" + string.Join("|", result.Errors));
         var level = PiggyFarmLevels.Load(result.LevelJson!);
         Assert.True(level.Pigs.Count(p => p.Type == "Boom") >= 3);
         var outcome = facade.Solve(new SolveCommand(result.LevelJson!, Encoding.UTF8.GetBytes(result.LevelJson!),
@@ -980,10 +980,11 @@ public sealed class PiggyFarmSpringRuleTests
     [Fact]
     public void 需求_弹簧猪布点生成_数量与纯度满足()
     {
-        // 布点式合成：弹簧需求改写模板上的普通猪（无池上限），纯度：未要求类型不出现
+        // 布点式合成：弹簧需求改写模板上的普通猪（无池上限），纯度：未要求类型不出现。
+        // band3 Dense112 纯普通密集模板：布点后贪心可解（自由流），弹簧换型不改变走位
         var result = new PiggyFarmFacade().Compose(
-            """{"band":2}""", "700", new ComposeContext("700", 2, "至少包含70只猪，其中包含5只弹簧猪", 99));
-        Assert.NotNull(result.LevelJson);
+            """{"band":3}""", "700", new ComposeContext("700", 3, "至少包含100只猪，其中包含5只弹簧猪", 99));
+        Assert.True(result.LevelJson is not null, "errors=" + string.Join("|", result.Errors));
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var pig in JsonNode.Parse(result.LevelJson!)?["pigs"]!.AsArray())
         {
@@ -996,5 +997,112 @@ public sealed class PiggyFarmSpringRuleTests
         Assert.DoesNotContain("Long", counts.Keys);
         Assert.DoesNotContain("Boom", counts.Keys);
         Assert.DoesNotContain("Duck", counts.Keys);
+    }
+}
+
+// 剪刀/气球族规则（ScissorsPig/BalloonPig 契约）：
+// 剪刀 = 普通猪 + 颜色标记（specialInfo 0黄/1绿/2蓝），走位完全一致，离场时剪断所有同色气球一根绳；
+// 气球猪 = 绳数系留（Balloon 3 / BalloonLong 5，类型常量非关卡字段），绳未剪完走位锁定、仍阻挡滑行；
+// 绳尽解锁为普通走位。每只剪刀只离场一次 = 每色一根绳（一次剪刀离场让该色所有气球各减 1 绳）
+public sealed class PiggyFarmScissorsBalloonRuleTests
+{
+    private static readonly PiggyFarmAdapter Adapter = new();
+
+    private static string Scissors(int id, string facing, (int X, int Y) a, (int X, int Y) b, int color) =>
+        $$"""{"id":{{id}},"facing":"{{facing}}","pigType":"Scissors","specialInfo":"{{color}}","occupiedCells":[{"x":{{a.X}},"y":{{a.Y}}},{"x":{{b.X}},"y":{{b.Y}}}]}""";
+
+    private static string Balloon(int id, int color, (int X, int Y) a, (int X, int Y) b, string type = "Balloon") =>
+        $$"""{"id":{{id}},"facing":"Up","pigType":"{{type}}","specialInfo":"{{color}}","occupiedCells":[{"x":{{a.X}},"y":{{a.Y}}},{"x":{{b.X}},"y":{{b.Y}}}]}""";
+
+    private static string Pig(int id, string facing, (int X, int Y) a, (int X, int Y) b, string type = "Normal") =>
+        $$"""{"id":{{id}},"facing":"{{facing}}","pigType":"{{type}}","specialInfo":"3","occupiedCells":[{"x":{{a.X}},"y":{{a.Y}}},{"x":{{b.X}},"y":{{b.Y}}}]}""";
+
+    private static string Level(string pigsJson, int width = 8, int height = 8)
+    {
+        var count = JsonNode.Parse("[" + pigsJson + "]")!.AsArray().Count;
+        return $$"""{"levelId":980,"difficulty":2,"levelName":"rope","mapWidth":{{width}},"mapHeight":{{height}},"pigCount":{{count}},"pigs":[{{pigsJson}}],"terrainElements":[]}""";
+    }
+
+    private static PiggyFarmState LoadState(string pigsJson, int width = 8, int height = 8) =>
+        Adapter.LoadLevel(PiggyFarmLevels.Load(Level(pigsJson, width, height)));
+
+    [Fact]
+    public void 解析_剪刀气球颜色解析_非法颜色按未就绪容忍()
+    {
+        var json = Level(Scissors(1, "Right", (0, 2), (1, 2), 1) + "," + Balloon(2, 2, (4, 4), (4, 5)));
+        Assert.Empty(new PiggyFarmFacade().FormatErrors(json));
+        var level = PiggyFarmLevels.Load(json);
+        Assert.Equal(1, level.Pigs.Single(p => p.Type == "Scissors").Color);
+        Assert.Equal(2, level.Pigs.Single(p => p.Type == "Balloon").Color);
+        // 非法颜色：游戏侧容忍为"颜色未就绪"（-1），不拒绝——与游戏行为一致
+        var lenient = PiggyFarmLevels.Load(Level(Scissors(3, "Right", (0, 2), (1, 2), 9)));
+        Assert.Equal(-1, lenient.Pigs.Single(p => p.Type == "Scissors").Color);
+    }
+
+    [Fact]
+    public void 规则_系绳气球不可点击且阻挡滑行()
+    {
+        // 气球绳 3 > 0：不在合法动作中；同排普通猪滑行贴脸停在气球左侧（系留气球是实体阻挡）
+        var layout = string.Join(",",
+            Pig(1, "Right", (0, 2), (1, 2)),
+            Balloon(2, 0, (4, 2), (4, 3)));
+        var state = LoadState(layout);
+        var moves = Adapter.GetLegalMoves(state);
+        Assert.Contains(moves, m => m.PigId == 1);
+        Assert.DoesNotContain(moves, m => m.PigId == 2);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        var moved = next.Pigs.Single(p => p.Id == 1);
+        Assert.Equal((2, 2), (moved.Cells[0].X, moved.Cells[0].Y));
+        Assert.Equal((3, 2), (moved.Cells[1].X, moved.Cells[1].Y));
+    }
+
+    [Fact]
+    public void 规则_同色剪刀离场剪绳_普通猪离场不剪()
+    {
+        var state = LoadState(Scissors(1, "Right", (0, 2), (1, 2), 0) + "," + Balloon(2, 0, (4, 4), (4, 5)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Equal(2, next.Pigs.Single(p => p.Id == 2).Counter);   // 3 -> 2
+
+        var plain = LoadState(Pig(1, "Right", (0, 2), (1, 2)) + "," + Balloon(2, 0, (4, 4), (4, 5)));
+        var unchanged = Adapter.ApplyMove(plain, new PiggyFarmMove(1));
+        Assert.Equal(3, unchanged.Pigs.Single(p => p.Id == 2).Counter);   // 普通猪离场不剪绳
+    }
+
+    [Fact]
+    public void 规则_异色剪刀离场不剪绳()
+    {
+        var state = LoadState(Scissors(1, "Right", (0, 2), (1, 2), 1) + "," + Balloon(2, 0, (4, 4), (4, 5)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Equal(3, next.Pigs.Single(p => p.Id == 2).Counter);
+    }
+
+    [Fact]
+    public void 规则_绳尽气球解锁走位()
+    {
+        // 三只同色剪刀分别在 0/2/5 行离场 → 色气球 3 次剪绳 → 绳尽 → 进入合法动作（走位如普通猪）
+        var layout = string.Join(",",
+            Scissors(1, "Right", (0, 0), (1, 0), 0),
+            Scissors(3, "Right", (0, 2), (1, 2), 0),
+            Scissors(5, "Right", (0, 5), (1, 5), 0),
+            Balloon(2, 0, (4, 3), (4, 4)));
+        var state = LoadState(layout);
+        var after1 = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Equal(2, after1.Pigs.Single(p => p.Id == 2).Counter);
+        var after2 = Adapter.ApplyMove(after1, new PiggyFarmMove(3));
+        Assert.Equal(1, after2.Pigs.Single(p => p.Id == 2).Counter);
+        var after3 = Adapter.ApplyMove(after2, new PiggyFarmMove(5));
+        Assert.Equal(0, after3.Pigs.Single(p => p.Id == 2).Counter);
+        Assert.Contains(new PiggyFarmMove(2), Adapter.GetLegalMoves(after3));
+    }
+
+    [Fact]
+    public void 规则_气球长猪5绳_同色剪刀逐次剪绳()
+    {
+        var layout = string.Join(",",
+            Scissors(1, "Right", (0, 2), (1, 2), 0),
+            "{\"id\":2,\"facing\":\"Up\",\"pigType\":\"BalloonLong\",\"specialInfo\":\"0\",\"occupiedCells\":[{\"x\":4,\"y\":4},{\"x\":4,\"y\":5},{\"x\":4,\"y\":6}]}");   // 1x3 脚印
+        var state = LoadState(layout, width: 8, height: 8);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        Assert.Equal(4, next.Pigs.Single(p => p.Id == 2).Counter);   // 5 -> 4
     }
 }

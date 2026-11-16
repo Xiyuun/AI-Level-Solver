@@ -5,8 +5,10 @@ using LevelForge.Kernel.Contracts;
 namespace LevelForge.Adapters.PiggyFarm;
 
 // 单只猪的规则状态：类型/朝向/当前占格；Cells 按 (y,x) 规范化排序，永不被原地修改
+// Counter：Boom = 剩余爆炸次数；Balloon/BalloonLong = 剩余绳数（3/5）
+// Color：Scissors 剪刀色 / Balloon 系绳色（0黄/1绿/2蓝；-1 未就绪）
 public sealed record PiggyFarmPig(
-    int Id, string Type, PigFacing Facing, IReadOnlyList<GridCell> Cells, int Counter = 0);
+    int Id, string Type, PigFacing Facing, IReadOnlyList<GridCell> Cells, int Counter = 0, int Color = -1);
 
 // 关卡状态：地图尺寸 + 场上全部猪 + 是否已触发失败（爆炸计数归零）。
 // 空列表且 !Failed = 已清场（胜利）；Failed 状态没有合法动作，求解器按死路处理。
@@ -39,20 +41,36 @@ public sealed class PiggyFarmAdapter :
             throw new ArgumentException("关卡没有猪：没有可操作对象");
         }
         var pigs = level.Pigs
-            .Select(p => new PiggyFarmPig(p.Id, p.Type, p.Facing, Normalize(p.Cells), p.Counter))
+            .Select(p => new PiggyFarmPig(
+                p.Id, p.Type, p.Facing, Normalize(p.Cells),
+                Counter: p.Type switch
+                {
+                    "Balloon" => 3,        // 游戏侧 initialRopeCount = 3（硬编码，非关卡字段）
+                    "BalloonLong" => 5,    // 游戏侧 initialRopeCount = 5
+                    _ => p.Counter,        // Boom 用 specialInfo 计数；其它类型 0
+                },
+                Color: p.Color))
             .OrderBy(p => p.Id)
             .ToArray();
         return new PiggyFarmState(level.MapWidth, level.MapHeight, pigs);
     }
 
+    // 该猪当前是否可被点击起步：小黄鸭永不；系绳气球猪（绳 > 0）走位锁定
+    public static bool CanBeClicked(PiggyFarmPig pig) =>
+        pig.Type != "Duck" && !IsTied(pig);
+
+    private static bool IsTied(PiggyFarmPig pig) =>
+        (pig.Type is "Balloon" or "BalloonLong") && pig.Counter > 0;
+
     // 当前局面全部合法操作（顺序稳定：按猪 Id 升序；空列表 = 无合法操作）：
     //   - 小黄鸭不可点击（游戏中 SkipWalkAfterClick，点击只广播不移动）
-    //   - 普通猪两种合法操作：能前进 = 滑行；被挡 = 原地顶撞（游戏里点击起步后立刻碰撞，同样触发碰撞事件）
+    //   - 系绳气球猪不可点击（绳 > 0 时走位锁定）
+    //   - 其余猪两种合法操作：能前进 = 滑行；被挡 = 原地顶撞（游戏里点击起步后立刻碰撞，同样触发碰撞事件）
     public IReadOnlyList<PiggyFarmMove> GetLegalMoves(PiggyFarmState state)
     {
         if (state.Failed) return Array.Empty<PiggyFarmMove>();
         return state.Pigs
-            .Where(pig => pig.Type != "Duck")
+            .Where(p => CanBeClicked(p))
             .Select(pig => new PiggyFarmMove(pig.Id))
             .ToArray();
     }
@@ -65,6 +83,10 @@ public sealed class PiggyFarmAdapter :
         if (pig.Type == "Duck")
         {
             throw new ArgumentException("非法动作：小黄鸭不可点击（游戏中点击只广播事件，不产生移动）");
+        }
+        if (IsTied(pig))
+        {
+            throw new ArgumentException($"非法动作：{PiggyFarmPigTypes.DisplayName(pig.Type)}绳未剪完，走位锁定（需同色剪刀离场解绳）");
         }
         if (!CanAdvance(state, pig))
         {
@@ -91,6 +113,11 @@ public sealed class PiggyFarmAdapter :
         if (slide.Exited)
         {
             next = state with { Pigs = state.Pigs.Where(p => p.Id != pig.Id).ToArray() };
+            // 剪刀猪离场：剪断所有同色气球猪的一根绳（游戏 OnPeerPigExited：每根绳需要一次同色剪刀离场）
+            if (pig.Type == "Scissors" && pig.Color >= 0)
+            {
+                next = CutRopes(next, pig.Color);
+            }
         }
         else
         {
@@ -145,6 +172,21 @@ public sealed class PiggyFarmAdapter :
         var next = ApplyInfection(state with { Pigs = pigs.OrderBy(p => p.Id).ToArray() }, pig.Id, slide.BlockerId ?? -1);
         var result = ResolveDucks(next) with { Failed = failed };
         return result;
+    }
+
+    // 剪刀剪绳（游戏 BalloonPig.OnPeerPigExited）：同色剪刀离场 → 每只同色气球猪剩余绳数 -1
+    //（绳数到 0 即解锁为普通走位；不同颜色/非剪刀离场/顶撞均不剪绳——游戏只认离场事件）
+    private static PiggyFarmState CutRopes(PiggyFarmState state, int color)
+    {
+        var changed = false;
+        var pigs = state.Pigs.Select(p =>
+        {
+            var isRoped = (p.Type == "Balloon" || p.Type == "BalloonLong") && p.Color == color && p.Counter > 0;
+            if (!isRoped) return p;
+            changed = true;
+            return p with { Counter = p.Counter - 1 };
+        }).ToArray();
+        return changed ? state with { Pigs = pigs } : state;
     }
 
     // 丧尸感染（游戏 PigManager.FindConvertibleNormal/ConvertNormalToZombie）：每次已结算接触中，
@@ -217,7 +259,7 @@ public sealed class PiggyFarmAdapter :
     }
 
     // 规范化状态键：地图尺寸 + 每只猪（Id/类型/朝向/规范化占格）
-    // 状态维度覆盖：位置、朝向、类型、在场集合——v1 没有剩余次数/冷却/道具等额外维度
+    // 状态维度覆盖：位置、朝向、类型、在场集合、爆炸计数、绳数、剪刀/气球颜色
     public string StateKey(PiggyFarmState state)
     {
         var sb = new StringBuilder();
@@ -225,7 +267,8 @@ public sealed class PiggyFarmAdapter :
         foreach (var pig in state.Pigs.OrderBy(p => p.Id))
         {
             sb.Append("|#").Append(pig.Id).Append(':').Append(pig.Type).Append(':').Append(pig.Facing);
-            if (pig.Type == "Boom") sb.Append(":c").Append(pig.Counter);
+            if (pig.Type == "Boom" || pig.Type is "Balloon" or "BalloonLong") sb.Append(":c").Append(pig.Counter);
+            if (pig.Color >= 0) sb.Append(":k").Append(pig.Color);
             foreach (var cell in pig.Cells)
             {
                 sb.Append(',').Append(cell.X).Append('.').Append(cell.Y);
@@ -277,7 +320,14 @@ public sealed class PiggyFarmAdapter :
                     props["facing"] = JsonValue.Create(pig.Facing.ToString());
                 }
                 props["pigType"] = JsonValue.Create(pig.Type);
-                if (pig.Type == "Boom") props["counter"] = JsonValue.Create(pig.Counter);
+                if (pig.Type == "Boom" || pig.Type is "Balloon" or "BalloonLong")
+                {
+                    props["counter"] = JsonValue.Create(pig.Counter);
+                }
+                if (pig.Color >= 0)
+                {
+                    props["color"] = JsonValue.Create(pig.Color);
+                }
                 entities.Add(new Entity(
                     $"pig-{pig.Id}-{cell.X}-{cell.Y}",
                     (isHead ? "pigHead" : "pigBody") + pig.Type,
@@ -336,7 +386,8 @@ public sealed class PiggyFarmAdapter :
                 ["facing"] = pig.Facing.ToString(),
                 ["cells"] = cells
             };
-            if (pig.Type == "Boom") pigNode["counter"] = pig.Counter;
+            if (pig.Type == "Boom" || pig.Type is "Balloon" or "BalloonLong") pigNode["counter"] = pig.Counter;
+            if (pig.Color >= 0) pigNode["color"] = pig.Color;
             pigs.Add(pigNode);
         }
         return new JsonObject

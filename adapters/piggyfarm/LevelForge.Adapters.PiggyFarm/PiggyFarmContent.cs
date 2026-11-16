@@ -70,6 +70,27 @@ public static class PiggyFarmContent
             "pigType": { "render": "badge", "text": "弹", "color": "#0f5132" } }
         },
         "pigBodySpring": { "shape": "rounded", "fill": "#3da565", "size": 0.86 },
+        "pigHeadScissors": {
+          "shape": "rounded", "fill": "#c9d1d9", "size": 0.92,
+          "props": { "facing": { "render": "arrow", "color": "#ffffff",
+              "rotate": { "Up": 0, "Right": 90, "Down": 180, "Left": 270 } },
+            "pigType": { "render": "badge", "text": "剪", "color": "#2f4f6f" } }
+        },
+        "pigBodyScissors": { "shape": "rounded", "fill": "#b8c4cc", "size": 0.86 },
+        "pigHeadBalloon": {
+          "shape": "circle", "fill": "#e58fb1", "size": 0.95,
+          "props": { "counter": { "render": "badge", "color": "#6b1b4f" },
+            "pigType": { "render": "badge", "text": "绳", "color": "#6b1b4f" } }
+        },
+        "pigBodyBalloon": { "shape": "circle", "fill": "#d78ab0", "size": 0.95 },
+        "pigHeadBalloonLong": {
+          "shape": "rounded", "fill": "#b06ad0", "size": 0.92,
+          "props": { "facing": { "render": "arrow", "color": "#ffffff",
+              "rotate": { "Up": 0, "Right": 90, "Down": 180, "Left": 270 } },
+            "counter": { "render": "badge", "color": "#4a1b6b" },
+            "pigType": { "render": "badge", "text": "长绳", "color": "#3a0f5b" } }
+        },
+        "pigBodyBalloonLong": { "shape": "rounded", "fill": "#9a55c0", "size": 0.86 },
         "pigHeadDuck": {
           "shape": "circle", "fill": "#f2d24b", "size": 0.95,
           "props": { "pigType": { "render": "badge", "text": "鸭", "color": "#6b5300" } }
