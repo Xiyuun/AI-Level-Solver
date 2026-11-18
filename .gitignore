@@ -20,3 +20,6 @@ Thumbs.db
 publish/
 !publish/README.md
 !publish/start.cmd
+
+# 发行包（package.cmd 产物：自包含目录 + 分发 zip）
+dist/

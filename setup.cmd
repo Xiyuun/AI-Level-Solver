@@ -1,20 +1,26 @@
 @echo off
-rem One-command setup for a new device: build solution + frontend + full tests,
-rem then build and deploy game plugin DLLs into platform data/plugins/.
+rem LevelForge one-click setup for a new device.
+rem Real work lives in tools\setup.ps1 (auto-installs .NET 10 SDK + Node.js per-user, then builds).
+rem ASCII only in .cmd files: cmd.exe parses batch files in the OEM codepage.
 setlocal
-cd /d %~dp0
+cd /d "%~dp0"
 
-echo [1/3] build solution + frontend + full tests (build.cmd)...
-call build.cmd
-if errorlevel 1 ( echo BUILD/TEST FAILED - fix before deploy & exit /b 1 )
+echo.
+echo   LevelForge one-click setup
+echo   ========================
+echo   This will check/install .NET 10 SDK and Node.js for the current user,
+echo   then build the platform, the UI and the game plugins.
+echo.
 
-echo [2/3] build and deploy game plugin DLLs...
-call deploy-plugins.cmd
-if errorlevel 1 ( echo PLUGIN DEPLOY HAD FAILURES - see messages above & exit /b 1 )
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\setup.ps1" %*
+set "CODE=%errorlevel%"
 
-echo [3/3] done. Startup checklist:
-echo   1. run.cmd to start the platform (http://localhost:5000)
-echo   2. Settings page: fill LLM base URL / API key / model (needed for level generation)
-echo   3. If a game project exists on this device, point its levels root at the
-echo      project's level data directory and re-import the corpus (wizard step 1)
-endlocal
+if not "%CODE%"=="0" (
+  echo.
+  echo Setup failed with exit code %CODE% - see the message above.
+  echo Tips: run this file again after fixing the problem, or use the packaged
+  echo       release ^(publish\ folder^) which needs nothing installed.
+  echo.
+  pause
+)
+exit /b %CODE%

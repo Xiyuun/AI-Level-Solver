@@ -525,7 +525,7 @@ public sealed class PiggyFarmComposerPreflightTests
         Assert.Empty(facade.ValidateContext(new ComposeContext("801", 2, "至少包含48只猪", 1)));
         var errors = facade.ValidateContext(new ComposeContext("802", 2, "至少包含100只猪", 1));
         Assert.NotEmpty(errors);
-        Assert.Contains(errors, e => e.Contains("99"));
+        Assert.Contains(errors, e => e.Contains("96"));
     }
 
     [Fact]
@@ -617,12 +617,20 @@ public sealed class PiggyFarmComposerRequirementPurityTests
     [Fact]
     public void 类型纯度_要求的小黄鸭按需求保留()
     {
-        // band3 鸭子模板 000359：110 猪含恰好 30 只小黄鸭
-        var result = Facade.Compose("""{"band":3}""", "502", new ComposeContext("502", 3, "至少包含100只猪，其中包含30只小黄鸭", 42));
+        // 小黄鸭自动离场、不产生点击：合成器按"鸭数"多铺等量可点猪，保证解长仍落在目标档
+        var result = Facade.Compose("""{"band":2}""", "502", new ComposeContext("502", 2, "至少包含80只猪，其中包含10只小黄鸭", 42));
         Assert.True(result.LevelJson is not null, "errors=" + string.Join("|", result.Errors));
         var counts = ParseTypes(result.LevelJson!);
-        Assert.True(counts.GetValueOrDefault("Duck") >= 30);
-        Assert.True(counts.GetValueOrDefault("Normal") >= 70);
+        Assert.True(counts.GetValueOrDefault("Duck") >= 10);
+        Assert.True(counts.GetValueOrDefault("Normal") >= 80);
+    }
+
+    [Fact]
+    public void 预检_3档30只小黄鸭如实拒绝_鸭不产生点击凑不出100解长()
+    {
+        // 30 只鸭之外还要 ≥100 只可点猪 = 130 > 112 物理上限：这是约束冲突，必须在调 LLM 前拒绝
+        var errors = Facade.ValidateContext(new ComposeContext("502", 3, "至少包含100只猪，其中包含30只小黄鸭", 42));
+        Assert.Contains(errors, e => e.Contains("小黄鸭"));
     }
 
     [Fact]

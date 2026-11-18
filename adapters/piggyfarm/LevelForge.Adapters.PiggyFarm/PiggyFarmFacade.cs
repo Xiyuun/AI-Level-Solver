@@ -58,7 +58,7 @@ public sealed class PiggyFarmFacade : IGameFacade, ILevelQualityGate, ILevelComp
         return PiggyFarmLevels.Validate(levelJson);
     }
 
-    // 结构化出题：模型只选档位，几何由模板拼装（详见 PiggyFarmComposer）
+    // 结构化出题：模型只选档位，几何由合成器逆向构造（详见 PiggyFarmComposer / PiggyFarmSynthesizer）
     public string CompositionSpec => PiggyFarmComposer.Spec;
 
     public ComposeResult Compose(string modelOutput, string? levelNumber) =>
@@ -70,11 +70,11 @@ public sealed class PiggyFarmFacade : IGameFacade, ILevelQualityGate, ILevelComp
     public IReadOnlyList<string> ValidateContext(ComposeContext context) =>
         PiggyFarmComposer.ValidateContext(context);
 
-    // 模板出题不传原生 few-shot（避免模型照抄几何，也跳过逐关求解采样）
+    // 结构化出题不传原生 few-shot（避免模型照抄几何，也跳过逐关求解采样）
     public bool WantsFewShot => false;
     public string? DescribeAsCoordinates(string levelJson) => null;
 
-    // 模板出题输出只是一个 {"band":N}，1k token 足够
+    // 结构化出题输出只是一个 {"band":N}，1k token 足够
     public int EstimateLevelTokens(string? levelNumber) => 1024;
 
     // 生成质量门（仅作用于生成候选，不拦导入的真实关卡）：逻辑在 PiggyFarmQuality，composer 环内共用
