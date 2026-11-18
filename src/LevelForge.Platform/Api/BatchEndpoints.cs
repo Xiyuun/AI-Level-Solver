@@ -43,6 +43,15 @@ public static class BatchEndpoints
                 : Results.Ok(status);
         });
 
+        // 单关详情（预览弹窗用）：题面 JSON + 磁带引用 + 求解事实
+        app.MapGet("/api/batch/{taskId}/items/{levelNumber:int}", (long taskId, int levelNumber, BatchService batch) =>
+        {
+            var detail = batch.GetItemDetail(taskId, levelNumber);
+            return detail is null
+                ? Results.NotFound(new { message = $"批量任务 {taskId} 中不存在编号 {levelNumber}" })
+                : Results.Ok(detail);
+        });
+
         // 取消任务（排队关不再执行、进行中的做完当前关）
         app.MapPost("/api/batch/{taskId}/cancel", (long taskId, BatchService batch) =>
         {

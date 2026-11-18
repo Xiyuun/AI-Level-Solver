@@ -529,6 +529,16 @@ button:disabled { opacity: 0.5; cursor: default; }
 .tone-ok .batch-cell-label { color: var(--ok); }
 .tone-bad { background: var(--danger-surface); border-color: var(--danger-border); }
 .tone-bad .batch-cell-label { color: var(--danger); }
+
+/* 已解关可点击（网格格与明细行）：预览弹窗入口 */
+.batch-cell.clickable { cursor: pointer; }
+.batch-cell.clickable:hover { border-color: var(--primary); }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: var(--surface-2); }
+
+/* 批量单关预览弹窗：宽版弹窗装下棋盘与回放控制条 */
+.dialog-preview { width: 720px; max-width: 94vw; max-height: 90vh; overflow-y: auto; }
+.batch-preview-facts { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); margin-bottom: 10px; }
 .tone-warn { background: var(--warn-surface); border-color: var(--warn-border); }
 .tone-running { background: var(--primary-soft); border-color: var(--primary); }
 .tone-running .batch-cell-label { color: var(--primary); }

@@ -1,5 +1,6 @@
 // 批量生产页（表现层_批量生产 §2/§3）：编号段 + 难度配比 → 后台逐关跑 → 结果网格 → 入库/导出
 // 页面可关：任务在后端队列执行，单机进程在任务就在（回到本页按 taskId 继续轮询）
+// 已解关可点开弹窗预览关卡内容与解法回放（复用工作台 PreviewPane，2026-11-16 取代"预览跳工作台"旧取舍）
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   adoptBatch,
@@ -9,6 +10,7 @@ import {
   retryBatchFailed,
   startBatch,
   type BatchStatus,
+  type GameDetail,
   type GameSummary,
 } from '../api/client'
 import {
@@ -24,10 +26,12 @@ import {
   type BatchForm,
 } from '../state/batch'
 import { useToastFor } from '../state/useToastFor'
+import type { VisualMapping } from '../renderer/model'
+import { BatchItemPreviewDialog } from '../components/BatchItemPreviewDialog'
 
 const POLL_MS = 1500
 
-export function Batch({ game }: { game: GameSummary }) {
+export function Batch({ game, detail }: { game: GameSummary; detail: GameDetail }) {
   const [form, setForm] = useState<BatchForm>({
     fromLevel: 111,
     toLevel: 130,
@@ -46,7 +50,9 @@ export function Batch({ game }: { game: GameSummary }) {
   useToastFor(message, error)
   const [busy, setBusy] = useState(false)
   const [overwrite, setOverwrite] = useState(false)
+  const [previewLevel, setPreviewLevel] = useState<number | null>(null)
   const timerRef = useRef<number | null>(null)
+  const mapping = detail.visualMapping as VisualMapping
 
   const span = spanLength(form.fromLevel, form.toLevel)
   const ratios = ratioTotal(form)
@@ -290,11 +296,13 @@ export function Batch({ game }: { game: GameSummary }) {
               <div className="batch-grid">
                 {grid.map((item) => {
                   const view = itemView(item)
+                  const previewable = item.status === 'solved'
                   return (
                     <div
                       key={item.levelNumber}
-                      className={`batch-cell tone-${view.tone}`}
-                      title={`${item.levelNumber}：${view.label}${item.failureSummary ? ` — ${item.failureSummary}` : ''}`}
+                      className={`batch-cell tone-${view.tone}${previewable ? ' clickable' : ''}`}
+                      title={`${item.levelNumber}：${view.label}${item.failureSummary ? ` — ${item.failureSummary}` : ''}${previewable ? '（点击预览与回放）' : ''}`}
+                      onClick={previewable ? () => setPreviewLevel(item.levelNumber) : undefined}
                     >
                       <span className="batch-cell-no">{item.levelNumber}</span>
                       <span className="batch-cell-label">{view.label}</span>
@@ -317,30 +325,49 @@ export function Batch({ game }: { game: GameSummary }) {
                 </div>
               )}
 
-              <details className="batch-detail">
+              <details className="batch-detail" open>
                 <summary>逐关明细（{grid.length} 条）</summary>
                 <table className="games-table">
                   <thead>
                     <tr><th>编号</th><th>状态</th><th>难度</th><th>解长</th><th>耗时</th><th>失败原因</th></tr>
                   </thead>
                   <tbody>
-                    {grid.map((item) => (
-                      <tr key={item.levelNumber}>
-                        <td>{item.levelNumber}</td>
-                        <td>{itemView(item).label}</td>
-                        <td>{item.difficultyBand ?? '—'}</td>
-                        <td>{item.solutionLength ?? '—'}</td>
-                        <td>{(item.elapsedMs / 1000).toFixed(1)}s</td>
-                        <td className="note">{item.failureSummary ?? ''}</td>
-                      </tr>
-                    ))}
+                    {grid.map((item) => {
+                      const previewable = item.status === 'solved'
+                      return (
+                        <tr
+                          key={item.levelNumber}
+                          className={previewable ? 'clickable' : ''}
+                          title={previewable ? '点击预览关卡内容与解法回放' : undefined}
+                          onClick={previewable ? () => setPreviewLevel(item.levelNumber) : undefined}
+                        >
+                          <td>{item.levelNumber}</td>
+                          <td>{itemView(item).label}</td>
+                          <td>{item.difficultyBand ?? '—'}</td>
+                          <td>{item.solutionLength ?? '—'}</td>
+                          <td>{(item.elapsedMs / 1000).toFixed(1)}s</td>
+                          <td className="note">{item.failureSummary ?? ''}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
+                <div className="note">点击已解编号（网格或表格均可）可预览关卡内容与解法回放。</div>
               </details>
             </>
           )}
         </div>
       </div>
+
+      {previewLevel !== null && (
+        <BatchItemPreviewDialog
+          gameId={game.gameId}
+          mapping={mapping}
+          taskId={taskId ?? 0}
+          levelNumber={previewLevel}
+          onClose={() => setPreviewLevel(null)}
+        />
+      )}
     </div>
   )
 }

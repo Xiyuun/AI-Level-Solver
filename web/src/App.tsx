@@ -135,7 +135,7 @@ export function App() {
           tab === 'workbench' ? (
             <Workbench game={current} detail={detail} onOpenOnboarding={() => setTab('onboarding')} />
           ) : tab === 'batch' ? (
-            <Batch game={current} />
+            <Batch game={current} detail={detail} />
           ) : tab === 'onboarding' ? (
             <Onboarding
               game={current}

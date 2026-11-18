@@ -607,6 +607,18 @@ export interface BatchStatus {
   items: BatchItem[]
 }
 
+// 单关详情（预览弹窗用）：状态行事实 + 最优候选题面与磁带引用
+export interface BatchItemDetail {
+  levelNumber: number
+  status: string // pending|running|solved|failed|skipped
+  difficultyBand: number | null
+  solutionLength: number | null
+  generationRunId: number | null
+  tapeId: number | null // 最优候选磁带，经 /api/tapes/{id} 取全文回放
+  contentJson: string | null // 最优候选题面原文（预览/试玩输入）
+  failureSummary: string | null
+}
+
 export interface BatchStartRequest {
   fromLevel: number
   toLevel: number
@@ -623,6 +635,9 @@ export const startBatch = (gameId: string, req: BatchStartRequest) =>
   sendJson<BatchStatus>('/api/batch/start', 'POST', { gameId, ...req })
 
 export const getBatchStatus = (taskId: number) => getJson<BatchStatus>(`/api/batch/${taskId}/status`)
+
+export const getBatchItem = (taskId: number, levelNumber: number) =>
+  getJson<BatchItemDetail>(`/api/batch/${taskId}/items/${levelNumber}`)
 
 export const cancelBatch = (taskId: number) =>
   sendJson<{ message: string }>(`/api/batch/${taskId}/cancel`, 'POST').then(() => undefined)

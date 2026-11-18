@@ -29,6 +29,17 @@ public sealed record BatchItemDto(
     string? FailureSummary,                           // 失败摘要
     long ElapsedMs);                                  // 耗时
 
+// 单关详情（预览弹窗用）：批量状态行 + 可视检查所需的题面与磁带引用
+public sealed record BatchItemDetailDto(
+    int LevelNumber,                                  // 关卡编号
+    string Status,                                    // pending|running|solved|failed|skipped
+    int? DifficultyBand,                              // 难度评估（有解时）
+    int? SolutionLength,                              // 解长（有解时）
+    long? GenerationRunId,                            // 关联生成运行 id
+    long? TapeId,                                     // 最优候选磁带（回放数据源，/api/tapes/{id} 取全文）
+    string? ContentJson,                              // 最优候选题面原文（预览/试玩输入）
+    string? FailureSummary);                          // 失败摘要（failed 时）
+
 // 批量任务状态
 public sealed record BatchStatusDto(
     long TaskId,                                      // 任务编号
@@ -53,6 +64,7 @@ public sealed class BatchService
     private readonly GameStore _games;                // 关卡库（跳过已入库编号+批量入库）
     private readonly SettingsStore _settings;         // 设置（并发默认值等）
     private readonly LevelFileStore _persist;         // 安全落盘（批量入库共用）
+    private readonly SolveRunStore _solveRuns;        // 求解运行行（解长事实来源，预览详情用）
     private readonly ConcurrentDictionary<long, BatchTask> _tasks = new();   // 任务表
 
     private static long _nextTaskId;                  // 自增任务号（线程安全用 Interlocked）
@@ -62,13 +74,14 @@ public sealed class BatchService
     #region 构造
 
     public BatchService(GenerationPipeline pipeline, GameRegistry registry,
-        GameStore games, SettingsStore settings, LevelFileStore persist)
+        GameStore games, SettingsStore settings, LevelFileStore persist, SolveRunStore solveRuns)
     {
         _pipeline = pipeline;
         _registry = registry;
         _games = games;
         _settings = settings;
         _persist = persist;
+        _solveRuns = solveRuns;
     }
 
     #endregion
@@ -106,6 +119,18 @@ public sealed class BatchService
     public BatchStatusDto? GetStatus(long taskId)
     {
         return _tasks.TryGetValue(taskId, out var task) ? ToDto(task) : null;
+    }
+
+    // 单关详情（预览弹窗用）：状态行事实 + 最优候选题面与磁带引用
+    public BatchItemDetailDto? GetItemDetail(long taskId, int levelNumber)
+    {
+        if (!_tasks.TryGetValue(taskId, out var task)) return null;
+        var item = task.Items.FirstOrDefault(i => i.LevelNumber == levelNumber);
+        if (item is null) return null;
+        return new BatchItemDetailDto(
+            item.LevelNumber, item.Status, item.DifficultyBand, item.SolutionLength,
+            item.GenerationRunId, item.TapeId,
+            task.GetAdoptedContent(levelNumber), item.FailureSummary);
     }
 
     // 取消任务：排队关不再执行、进行中的做完当前关
@@ -209,14 +234,20 @@ public sealed class BatchService
                 task.Request.SpecialRequirements,
                 task.Request.CandidateLimit,
                 task.Request.SolveTimeoutMs));
+            var adopted = summary.Candidates.LastOrDefault(c => c.FailureClass == "none");
             task.SetRunId(levelNumber, summary.RunId);
-            task.SetContent(levelNumber, summary.Status == "succeeded"
-                ? summary.Candidates.LastOrDefault(c => c.FailureClass == "none")?.ContentJson
-                : null);
+            // 最优候选的题面与磁带一起缓存（预览弹窗的数据源；失败时双清空，重试后不残留旧值）
+            task.SetAdopted(levelNumber,
+                summary.Status == "succeeded" ? adopted?.ContentJson : null,
+                summary.Status == "succeeded" ? adopted?.TapeId : null);
+            // 解长事实从求解运行行取（CandidateAttempt 只带 SolveRunId 引用）
+            var solutionLength = adopted?.SolveRunId is { } solveRunId
+                ? _solveRuns.Get(solveRunId)?.SolutionLength
+                : null;
             task.UpdateItem(levelNumber,
                 summary.Status == "succeeded" ? "solved" : "failed",
                 summary.Candidates.LastOrDefault(c => c.DifficultyBand is not null)?.DifficultyBand,
-                summary.Candidates.LastOrDefault(c => c.DifficultyBand is not null)?.SolveRunId,
+                solutionLength,
                 summary.RunId,
                 summary.Status == "succeeded" ? null : summary.FailureSummary,
                 sw.ElapsedMilliseconds);
@@ -287,14 +318,15 @@ internal sealed class BatchTask
     // 编号 → 难度
     public int DifficultyOf(int levelNumber) => _difficultyMap.GetValueOrDefault(levelNumber, 2);
 
-    // 更新行状态
-    public void UpdateItem(int levelNumber, string status, int? difficultyBand, long? solutionRunId,
+    // 更新行状态（solutionLength 为解长事实；此前此处误收运行 id 且从不赋值，解长列恒空）
+    public void UpdateItem(int levelNumber, string status, int? difficultyBand, int? solutionLength,
         long? generationRunId, string? failureSummary, long elapsedMs)
     {
         var item = Items.FirstOrDefault(i => i.LevelNumber == levelNumber);
         if (item is null) return;
         item.Status = status;
         item.DifficultyBand = difficultyBand;
+        item.SolutionLength = solutionLength;
         item.GenerationRunId = generationRunId;
         item.FailureSummary = failureSummary;
         item.ElapsedMs = elapsedMs;
@@ -307,22 +339,26 @@ internal sealed class BatchTask
         if (item is not null) item.GenerationRunId = runId;
     }
 
-    // 缓存候选内容
-    public void SetContent(int levelNumber, string? content)
+    // 缓存最优候选的题面与磁带引用（预览弹窗数据源；传 null 即双清空）
+    public void SetAdopted(int levelNumber, string? content, long? tapeId)
     {
         _contents[levelNumber] = content;
+        var item = Items.FirstOrDefault(i => i.LevelNumber == levelNumber);
+        if (item is not null) item.TapeId = tapeId;
     }
 
     // 取候选内容
     public string? GetAdoptedContent(int levelNumber) => _contents.GetValueOrDefault(levelNumber);
 
-    // 重置为 pending（重试失败用）
+    // 重置为 pending（重试失败用）；旧解长与磁带引用一并清掉，重试期间不残留
     public void ResetItem(int levelNumber)
     {
         var item = Items.FirstOrDefault(i => i.LevelNumber == levelNumber);
         if (item is null) return;
         item.Status = "pending";
         item.FailureSummary = null;
+        item.SolutionLength = null;
+        item.TapeId = null;
     }
 
     // 统计属性
@@ -342,6 +378,7 @@ internal sealed class BatchItem
     public string? FailureSummary { get; set; }           // 失败摘要
     public long ElapsedMs { get; set; }                   // 耗时
     public int? SolutionLength { get; set; }              // 解长
+    public long? TapeId { get; set; }                     // 最优候选磁带（预览回放用）
 
     public BatchItem(int levelNumber)
     {
