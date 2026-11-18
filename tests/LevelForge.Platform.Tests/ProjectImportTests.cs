@@ -160,6 +160,34 @@ public sealed class ProjectImportTests
         }
     }
 
+    // 回归（2026-11-17 导入 500）：项目内含根为数组的 JSON（Cocos 地图/动画/多语言很常见），
+    // 抽样解析曾直接 EnumerateObject 抛 InvalidOperationException → 导入 500。
+    // 修复后按根类型如实标注（[数组×N]），导入照常成功。
+    [Fact]
+    public async Task 导入_含数组根JSON的项目_抽样不崩并如实标注()
+    {
+        var projectDir = MakeCocosProject(Path.Combine(Path.GetTempPath(), "lf-arr-" + Guid.NewGuid().ToString("N")));
+        var assets = Path.Combine(projectDir, "assets", "resources");
+        Directory.CreateDirectory(assets);
+        File.WriteAllText(Path.Combine(assets, "i18n.json"), """[{"key":"a"},{"key":"b"},{"key":"c"}]""");
+        using var factory = new PlatformFactory();
+        var client = factory.CreateClient();
+        try
+        {
+            var resp = await PostJsonAsync(client, "/api/projects/import", new { directory = projectDir });
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);   // 修复前这里 500
+
+            var raw = await resp.Content.ReadAsStringAsync();
+            var result = JsonSerializer.Deserialize<Api.ProjectImportResultDto>(raw, Json)!;
+            var detail = await client.GetStringAsync($"/api/games/{result.GameId}");
+            Assert.Contains("[数组×", detail);   // 画像抽样如实标注数组根
+        }
+        finally
+        {
+            try { Directory.Delete(projectDir, true); } catch (IOException) { }
+        }
+    }
+
     [Fact]
     public async Task 导入_无法识别的目录_给可操作的错误()
     {

@@ -343,7 +343,7 @@ public static class ProjectScanner
                 try
                 {
                     using var doc = JsonDocument.Parse(File.ReadAllText(full));
-                    var keys = string.Join(",", doc.RootElement.EnumerateObject().Select(p => p.Name).Take(12));
+                    var keys = DescribeRootElement(doc.RootElement);
                     var preview = candidate.Directory == topDir ? ReadPreview(full, j.Bytes) : null;
                     samples.Add(new SampleFile(j.Rel, j.Bytes, true, keys, null, preview));
                 }
@@ -363,8 +363,7 @@ public static class ProjectScanner
                 try
                 {
                     using var doc = JsonDocument.Parse(File.ReadAllText(full));
-                    samples.Add(new SampleFile(j.Rel, j.Bytes, true,
-                        string.Join(",", doc.RootElement.EnumerateObject().Select(p => p.Name).Take(12)), null));
+                    samples.Add(new SampleFile(j.Rel, j.Bytes, true, DescribeRootElement(doc.RootElement), null));
                 }
                 catch (Exception ex) when (ex is JsonException or IOException)
                 {
@@ -374,6 +373,18 @@ public static class ProjectScanner
         }
         return samples;
     }
+
+    // 抽样文件的根元素描述：对象给顶层键；数组/标量如实标注类型与规模。
+    // Cocos 项目里地图/动画/多语言常是数组根——它们不是关卡配置，但也是有效 JSON：
+    // 必须照实呈现，不能当成解析失败，更不能直接 EnumerateObject 抛异常（曾致导入 500，2026-11-17）。
+    private static string DescribeRootElement(JsonElement root) => root.ValueKind switch
+    {
+        JsonValueKind.Object => string.Join(",", root.EnumerateObject().Select(p => p.Name).Take(12)),
+        JsonValueKind.Array => $"[数组×{root.GetArrayLength()}]",
+        JsonValueKind.String => "[字符串]",
+        JsonValueKind.Number => "[数值]",
+        _ => $"[{root.ValueKind}]",
+    };
 
     // 原文预览：只读小文件（≤64KB），截断到 2000 字符；读取失败返回 null（照实降级，不影响扫描结论）
     private static string? ReadPreview(string fullPath, long bytes)

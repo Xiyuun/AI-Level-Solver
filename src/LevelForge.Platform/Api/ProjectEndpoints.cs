@@ -33,6 +33,11 @@ public static class ProjectEndpoints
                     ? Results.Conflict(new { message = ex.Message })
                     : Results.BadRequest(new { message = ex.Message });
             }
+            catch (Exception ex)
+            {
+                // 扫描兜底：项目内容千奇百怪（如根为数组的 JSON），任何未预期异常都带原因返回，不 500
+                return Results.BadRequest(new { message = $"导入失败：{ex.Message}" });
+            }
         });
 
         // 平台内生成适配层（三轮 D9 解冻：后台任务——生成→编译→错误回喂循环≤4轮→装载→自动门1）
@@ -79,6 +84,11 @@ public static class ProjectEndpoints
             catch (ProjectImportException ex)
             {
                 return Results.BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                // 扫描兜底：与导入同口径——未预期异常带原因返回，不 500
+                return Results.BadRequest(new { message = $"重新扫描失败：{ex.Message}" });
             }
         });
 
