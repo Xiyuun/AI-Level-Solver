@@ -2,7 +2,7 @@
 
 > 用途：本文件供**新的 AI 会话/协作者**在本仓库上无缝接续实现工作。它承载"只存在于原对话中"的工作记忆：进度、计划、决策与约定。
 > 配套阅读：上级目录的 14 份设计文档（v0.2 修订版，方案书.md 为总纲）——设计文档已定稿，一律不改，按文档语义实现。
-> 最后更新：2026-11-04（19 步实现计划全部完成；优化轮 M0~M4 见第十节；**三轮·阶段 B 已落地**：项目导入 + 移除内置滑动猪，见 10.5）。
+> 最后更新：2026-11-17（19 步实现计划全部完成；优化轮与后续批次见第十节；**批量页单关预览**见 10.15，**生成雷同修复**见 10.16，**生成 JSON 直通项目契约**见 10.17，**导入数组根 JSON 500 修复**见 10.18，**mahjong-260417 适配层交付**见 10.19，**mahjong 生成端意图制 composer 修复**见 10.20）。
 > 范围：第 0~19 步已全部完成 ✅（第 16 步的滑动猪真实接入在公司机完成并已转正 production；2026-11-04 晚已按三轮计划移出内置注册表，源码保留作 piggyfarm 适配层参考）。
 
 ## 一、项目一句话
@@ -597,3 +597,93 @@ Normal/Long/RichPig（滑动家族）、Boom（碰撞扣计数）、Spring、Tim
 - 实测：band2 `至少包含70只猪，其中包含5只弹簧猪` → **81 猪 = 76 普通 + 5 弹簧** ✓ 纯度满足（无未要求类型混入）；语料重导 175 → **264 关**。
 - 适配层测试 57 → **64**（SpringRule 7：解析/离场/弹回+计数递减/普通猪不受位移/零距离顶撞/弹回触发鸭离场/布点需求纯度）。
 - 后续批次：Scissors+Balloon(+Rope 别名) 族 → Cage/CageL 族 → Zombie 链式已毕；IcePig/ClockworkPig/BalloonLong 为游戏 11-09 后新类型，契约需重新提取。
+
+### 10.15 批量页补齐单关预览与解法回放 + 解长死字段修复（2026-11-16）
+
+用户实测批量生产（500~502 三关已解）发现：结果只有文字指标，没有像工作台一样的关卡内容与求解步骤展示，批量结果无法可视检查。
+
+- **设计决策变更**：《表现层_批量生产》原取舍"批量页不含棋盘动画，预览跳转工作台"作废——批量关未入库前工作台根本没有这关，"跳转"无从落地。用户拍板改为**批量页内弹窗直接预览**。设计文档仍不改，此变更记录在此。
+- **后端**（数据链路本来齐全，只差批量层暴露）：
+  - 新增 `GET /api/batch/{taskId}/items/{levelNumber}` → `BatchItemDetailDto`（状态/难度/解长/runId/**tapeId**/**contentJson**/失败摘要）；轮询用的 `BatchItemDto` 保持轻量不变；
+  - `BatchTask.SetContent` → `SetAdopted(levelNumber, content, tapeId)`：单关收口时把最优候选（`FailureClass=="none"` 末个）的磁带引用与题面一起缓存，失败双清空（重试不残留）；`ResetItem` 同步清 tapeId/解长；
+  - **解长死字段修复**：`UpdateItem` 第 4 参原为 `solutionRunId` 且函数体从不使用、`SolutionLength` 从未赋值（明细表恒显"—"，参数收到的其实是运行 id）；改为 `int? solutionLength` 并从 `_solveRuns.Get(solveRunId).SolutionLength` 取真实解长。
+- **前端**：
+  - 新建 `BatchItemPreviewDialog`：自包含取数（详情 → `getTapeJson`），body 复用工作台同一套 `PreviewPane`——回放（播放/单步/倍速/时间轴/moveText）与试玩（合法动作步进）免费获得；
+  - 批量页状态网格与逐关明细表的**已解项可点击**（hover 提示），`App.tsx` 给批量页传 `detail`（visualMapping 渲染口径与工作台一致）；
+  - 弹窗宽版样式 `.dialog-preview`（720px）+ `.batch-preview-facts` 指标行。
+- **测试**：BatchApiTests 7→**10**——solved 黄金路径（ScriptedLlm stub 驱动 2 关真实走完整流水线，断言 contentJson/tapeId/solutionLength/difficultyBand 齐全，一并回归解长 bug）+ failed 路径（无题面无磁带、如实带失败摘要）+ 404（任务/编号不存在）。**踩坑**：stub 的 `Queue.Dequeue` 非线程安全，批量并发请求下竞态喂出 `{}` 导致偶发失败——GenerationTests 串行单发从未暴露；已加锁。
+- 验证：全量 `dotnet test` 退出码 0，前端 vitest 95 全绿。
+- 已知边界（本次不做）：批量任务仍是内存态（进程重启任务即丢，详情端点随之失效）；失败关不做点击预览（摘要已内联展示）。
+
+### 10.16 PiggyFarm 批量/单发生成关卡雷同：确定性兜底 + 模板池坍缩修复（2026-11-16）
+
+用户实测：piggyfarm 批量 3 关（500/501/502，2 档）内容完全一样，重开也不重抽。经数据库指纹取证（11 次历史生成）定位根因——**不是缓存**（每次运行 LLM 真实调用、种子每次不同），而是 composer 层三重叠加：
+
+- **确定性兜底**：24 次布点尝试全失败后，无类型需求兜底固定返回 `templates[0]+对称0`——完全不看种子。实锤：编号 500 相隔 37 分钟两次生成全文哈希一字不差（`6ef3978b10`）。
+- **模板池坍缩**：全部 11 次历史产出都是 Level374（77 猪）。部署诊断日志后确认——其余 6 个模板 **43 次失败全是内嵌求解 `ResourceLimit`**（5s/20 万节点对 86~99 猪稠密模板不够），**10 次是判档偏高**（判 3 ≠ 目标 2）；模板 #0 一被选中即成功。选择本身均匀，坍缩来自这两道闸。
+- **随机变异丢失**：`TransformTemplate` 收了 `random` 但从未使用——10.28 的随机删猪变异在 v2 布点式重写时丢了；两处静默 continue（不可解/判档）也无日志，失败原因长期不可见。
+
+修复（`PiggyFarmComposer.cs` + 新 `PiggyFarmQuality.cs`）：
+- **兜底随种子变化**：随机对称（4 选 1）+ 随机删猪；模板仍取判档最稳的 `templates[0]`，流水线判档仍是最后闸。
+- **恢复随机删猪变异**：自由生成时删 0~8 只（尊重需求下限、重编号 id、同步 pigCount）；有类型需求不删（布点/纯度依赖完整模板）。删后由环内**质量门自查**（新增 `PiggyFarmQuality` 静态助手，facade 与 composer 共用同一份标准）提前拦截，不烧候选预算。
+- **静默失败补日志**：每次尝试记录 模板#序号(猪数)对称N + 六类障碍（布点/格式/数量/质量/判解/判档），落到平台 stderr。
+- 批量与单次生成同链路（GenerationPipeline→Compose），一处修复两条路径同时生效。
+
+测试：适配层 64→**72**（+多种子几何不塌缩[5 种子≥3 种几何]、+删猪尊重需求下限[8 种子全≥70 只]；2 档模板测试猪数下界 70→60 适配删猪变异）。全量 build.sh 退出码 0。
+
+验证（指纹口径：pigs 规范化 SHA-1）：
+- 批量 505/506/507：几何 `755dcc9c6b`/`256b750c63`/`31e31eb91f` 互异（猪数 74/76/72，删 3/1/5 只），解长 88/87/91——修复前同场景三关全为 `877cf4f92d`。
+- 单发同参数两次（编号 999）：`647214a49c`(374+对称2 无删) / 删 3 只变体，互异且都不同于修复前的重复产出。
+
+后续候选优化（未做）：其余 6 模板的 43 次 ResourceLimit 提示内嵌预算与平台侧 30s 不匹配（放宽或复用判卷结果）；判 3≠2 的 10 次说明部分模板难度偏高，可考虑移档或按目标档重配池。
+
+### 10.17 生成关卡 JSON 直通项目契约：ID 连续/缺省结构/六位文件名（2026-11-16）
+
+用户提供外部分析（`PiggyFarm关卡JSON生成与规范化修复指南_20261116.md`）：工具生成的关卡 JSON 被游戏 `generate.ps1` 拒绝，首个阻断点是 **`pigs[37].id must equal its array index`**——81 猪样本（424/BoomB2 模板 + 3 僵尸需求）纯度剥离 16 只 Boom 后只更新了 pigCount、**没有重编号 id**，留下 37..52 的 ID 缺口。另有缺省结构缺失、名称数量失真、交付文件名三个次级问题。取数口径：游戏要求 `pigs[i].id == i`（generate.ps1 硬校验 + 编辑器正式导出口径），新导出应显式写 `terrainElements:[]` 与完整 `specialData`（rabbit 全 0 + pigSkin None/0），levelName 若含数量须用最终值，交付文件名六位零填充（000500.json）。
+
+修复（三处）：
+- **导出规范化**（composer 新增 `FinalizeExport`，模板路径两处产出点 + band1 Serialize 统一接入）：①`pigs[i].id = i` ②`pigCount = 最终数组长度` ③显式补齐缺省 `terrainElements/specialData`（已有合法配置保留）④levelName 按最终猪数重写（v2-template-{档}档-{N}猪）。
+- **校验器同口径收紧**：`PiggyFarmLevels.ParsePig` 增加 `id == 数组索引` 硬校验（此前只查唯一性，漏放了缺口样本）。真实语料 264 关全部通过——证明该口径与游戏一致、不误伤真实关卡。
+- **交付文件名**：`IGameFacade` 新增默认接口方法 `LevelFileName(levelId)`（默认 `{id}.json` 零破坏），`PiggyFarmFacade` 覆写为六位补零（`long → D6`），`LevelFileStore` 落盘/回读两处改走门面口径。
+
+测试适配：规则测试夹具（Duck/Zombie/Spring/ScissorsBalloon 四区域 27 用例）原为 1-based 手写 id，与收紧后的契约冲突——按"id=数组索引"逐用例重写夹具与动作引用（含非顺序编号如 11/31/鸭2/鸭6 的位置化重映射），语义与断言不变；+3 新契约回归（僵尸剥离场景 id 连续+缺省结构+名称数量、校验器拒绝 id 缺口、六位文件名）。适配层 72→**75** 全绿（含语料 264 关过新校验），全量 build.sh 退出码 0。
+
+端到端验收（用户原始场景 500 关+3 僵尸猪复现）：生成 → **12 项契约逐项全过**（id 连续 0..74 / pigCount=75 / 缺省结构 / 名称 `v2-template-2档-75猪` 与实际一致 / 僵尸≥3 / 纯度仅 Normal+Zombie / 2 格脚印 / 数值类型纪律 / 判档 2）；采纳落盘文件为 `000500.json`（data/levels/piggyfarm/）。
+边界（如实声明）：本修复保证"格式通过"（结构/字段/ID/文件名契约）；`guide §11.3` 的"项目接入通过"（generate.ps1 + Luban + Catalog）与"玩法验收"（Unity 试玩）需用户按指南 §10 流程实际走一遍——工具侧不能自证。
+
+### 10.19 mahjong-260417 适配层（路径 B 交付，2026-11-17）
+
+按需求包为 Cocos 麻将连连看项目 `mahjong_260417` 产出求解器适配层（插件工程在工具仓库之外 `adapters-mahjong/`，绝对路径 ProjectReference 引 FacadeContracts+Kernel）。
+
+- **规则语义（全量阅读规则承载代码后确立）**：消除=相邻同型（四邻+无墙）或同轴无遮挡；拖动含推动链与连排组刚性位移；胜利=非墙棋子清空；消除后死局（剩余<2 或无走法）判负。**求解语义 = 游戏 LevelSolvabilitySolver 官方抽象**（POP/FLIP 按普通棋、ICE/CONT/WALL 按局内规则、仅点击/拖动消对、hashState 归并口径）。
+- **确定性关键结论**：运行时实际游玩的棋盘 = `LevelLayoutBuilder.flattenConfig` 产出的**全预设形态**（进关走 `initFromPreloaded`，"跳过牌面随机、程序化填充与可解验证"）。据此 v1 求解对象锁定全预设 config；生成型关卡规格（chesses < chessCount 或含填充参数）以"v1 支持子集之外"如实拒绝——语料导入实测 **1 关导入 + 42 关子集外跳过 + 0 失败**。
+- **随机源定性（三处，均已边界化）**：填充/重排 Math.random（生成期，flatten 后无）、爆竹炸随机对（求解抽象忽略）、牌面重映射（结构同构）。
+- **实现**：七成员 + 执行协议（moveSchema/semanticSchema v1）+ 可采纳启发式（剩余对数下界）+ 门1 样本组装（6 维度键判别对/纯函数/确定性代表关）。求解注入内核 `GreedyDfsSolver`（超大规模状态空间找任一解，预算耗尽=ResourceLimit 诚实语义）。
+- **测试**：xUnit 26 用例全绿（解析/规则/非法数据/状态键含抽象归并口径/纯函数/门1/真实语料 1.json 端到端求解出磁带 win、解长 8）。
+- **平台闭环**：Release DLL 部署 `data/plugins/mahjong-260417/` → 平台检测 loaded=ok → **门1 五项全绿** → levelsRoot 指向语料目录导入 43 关 → 平台 `/api/solve` 对 1 号关求解 0.12s 出解出带（tapeId=119）。
+- **产物**：`adapters-mahjong/onboarding-output/`（资格报告/规则矩阵/动作与语义 schema/格式说明书/机制表/视觉映射/规则书/MANIFEST）。
+- 边界（如实声明）：门2 真机对拍未跑——harness 须按 initFromPreloaded 加载同一全预设关并按 semantic-schema v1 抽象口径实报；爆竹随机与翻面翻转细节属口径差异而非实现错误（规则矩阵 #6/#7）。
+
+### 10.20 mahjong 生成端失败修复：意图制多米诺铺装 composer（2026-11-17）
+
+接入后实测生成端连续失败：候选判 `UnsolvableProven｜探索 0 状态｜0ms`，回填重生也救不回来。
+
+- **根因（数据库候选取证）**：LLM 直出全预设几何不可靠——attempt1 两种牌面只放 1 只（奇偶不变量必无解）；attempt2 满盘 24 种牌面各 2 只但全部散开，**满盘无空格时唯一可消是相邻对，开局 0 相邻对 → 根节点 0 走法** → 贪心 DFS 栈立即耗尽 → `UnsolvableProven`（探索 0/0ms 如实反映根死局，非求解器缺陷）。失败回喂只给统计数字，模型无法据此修正网格几何。
+- **修复（piggyfarm 同款"坐标制"思想）**：新增 `MahjongComposer`——模型只出**意图** `{"width","height","icePairs"}`，几何由代码按 ComposeContext.Seed **确定性多米诺铺装**：满盘划分为相邻同牌面对（开局必有可消对；逐多米诺消除恒可清盘，归纳可证）。铺装内部贪心失败自动重洗（≤20 次），拼装后过**本适配层求解器在环复核**（贪心 DFS 2s/5 万节点），未过换种子重建（≤3 次）。模型输出整份原生配置时仍按原生直通校验（合法即接受）。冰冻对上限总对数 1/4（info=2，其余对消除一次即解冻）。
+- **测试**：适配层 31→**36** 用例（+意图拼装可解且全预设/同种子同布局异种子异布局/冰冻对可清盘/原生直通/意图非法可操作错误）。
+- **平台闭环实测**：重部署（注意：插件 DLL 首次装载后即被 ALC 锁定，更新必须停平台→拷贝→重启，detect 的 allowOverwrite 只重装载不解除文件锁）→ detect 门1 全绿 → **连续 3 关生成全部一次成功**（2.5~2.7s/关，48 子 24 面 0 奇数面，磁带齐）。
+- 教训沉淀：LLM 直出网格几何的失败模式不止"格式错"——还有"格式对但语义不可解"（布局类玩法的高发形态）；意图制+求解器在环是此类玩法的通用解。
+- **前端渲染崩溃修复（同日追补）**：工作台生成预览崩 `Cannot read properties of undefined (reading 'split')`——根因是视觉映射 globalFields 误写 `key`（渲染器契约字段为 `path`+`render`，`lookupPath(globals, undefined)` 即崩）；props 显示规则也缺 `render`。已按渲染规范修正适配层视觉映射与快照 props（最小集：face 恒有/specialInfo 非零才发/frozen 仅冰冻棋），并同步 onboarding-output/visual-mapping.json。**教训**：适配层交付时视觉映射必须按 `web/src/renderer/model.ts` 的 GlobalField/PropRenderRule 契约逐字段核对，不能凭直觉写字段名。
+- **运维坑**：插件 DLL 首次装载后即被 ALC 锁定，热更新必须停平台→拷贝→重启（detect 的 allowOverwrite 只重装载不解除文件锁）；曾因此部署了陈旧构建（哈希对比已加入部署脚本）。另：平台重启后浏览器页面的 games 行 detail 是旧快照，需刷新页面才会拉到修正后的视觉映射。
+
+### 10.18 导入项目 HTTP 500：数组根 JSON 抽样崩溃修复（2026-11-17）
+
+用户导入 Cocos 麻将项目（mahjong_260417）必现 HTTP 500。平台日志定位：`ProjectScanner.SampleFiles` 对抽样 JSON 直接 `EnumerateObject()`，而该项目含**根为数组的 JSON**（Cocos 地图/动画/多语言常见形态）→ `InvalidOperationException` 不在 `JsonException/IOException` 过滤器内 → 未处理异常 500。全文件排查确认仅此两处未防护（其余枚举点均有 ValueKind 守卫）。
+
+修复（三处）：
+- **扫描器**：新增 `DescribeRootElement`——对象给顶层键（原行为）、数组/标量如实标注 `[数组×N]`/`[字符串]`/`[数值]`（有效 JSON 照实呈现，不误报解析失败、不抛异常），两处抽样点改走该助手。
+- **端点兜底**：`/api/projects/import` 与 rescan 增加 catch-all——任何未预期扫描异常带原因返回 400，导入类操作不再可能 500。
+- 测试：+`导入_含数组根JSON的项目_抽样不崩并如实标注`（导入 200 + 画像含 `[数组×`）；平台导入测试 11→**12** 全绿；全量 build.sh 退出码 0。
+
+实测（用户真实项目）：带引号路径（NormalizeRoot 剥离）导入 mahjong_260417 → HTTP 200 / 0.86s / 识别 cocos-creator3；画像中 5 处数组根文件标注 `[数组×11]`。
+运维注：该 500 与 10.15-10.17 无关联，属导入扫描器的独立健壮性缺陷；修复后平台已用新二进制重启。
