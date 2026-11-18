@@ -97,32 +97,52 @@ public static class PiggyFarmComposer
         var lastObstacle = "未知";
         for (var attempt = 0; attempt < MaxAttempts; attempt++)
         {
-            var chosen = templates[random.Next(templates.Length)];
+            var templateIndex = random.Next(templates.Length);
+            var chosen = templates[templateIndex];
             var symmetry = random.Next(4);
-            // 对称变换 + 重编号（保持可解性的结构骨架）
-            var node = JsonNode.Parse(TransformTemplate(chosen, levelNumber, band.Value, symmetry, random))!;
+            // 对称变换（保持 12×19 与可解性的结构骨架）
+            var node = JsonNode.Parse(TransformTemplate(chosen, levelNumber, band.Value, symmetry))!;
+            // 随机删猪变异（10.28 引入，v2 布点式重写时曾丢失）：自由生成时删 0~8 只增加同模板形态多样性；
+            // 有类型需求时不删——布点/纯度剥离依赖完整模板几何
+            DeleteRandomPigs(node, random, req.Types.Count > 0 ? -1 : req.Total);
 
             // 需求布点：剥离未要求特殊猪（纯度）+ 把要求的特殊猪放置到模板上（换型/收缩/延伸/落位）
             var placeError = req.Types.Count > 0 ? PlaceRequirements(node, req, random) : null;
             if (placeError is not null)
             {
                 lastObstacle = placeError;
+                Console.Error.WriteLine(
+                    $"[compose] attempt {attempt}: 模板#{templateIndex}({CountPigs(chosen)}猪)对称{symmetry} 布点未过({lastObstacle})");
                 continue;
             }
 
+            // 最终导出规范化：id=索引 / pigCount=最终长度 / 补缺省结构 / 名称用最终数量（项目契约，见 FinalizeExport 注释）
+            FinalizeExport(node, $"v2-template-{band.Value}档-{node["pigs"]!.AsArray().Count}猪");
             var json = node.ToJsonString();
             var formatErrors = PiggyFarmLevels.Validate(json);
             if (formatErrors.Count > 0)
             {
                 lastObstacle = string.Join("；", formatErrors.Take(2));
-                Console.Error.WriteLine($"[compose] attempt {attempt}: obstacle={lastObstacle}");
+                Console.Error.WriteLine(
+                    $"[compose] attempt {attempt}: 模板#{templateIndex}({CountPigs(chosen)}猪)对称{symmetry} 格式未过({lastObstacle})");
                 continue;
             }
             // 总只数下限核对：产出猪数必须 ≥ 需求（布点只增不减，但模板本身可能小于需求）
             if (PiggyFarmLevels.Load(json).Pigs.Count < required)
             {
                 lastObstacle = $"产出 {PiggyFarmLevels.Load(json).Pigs.Count} 只，不足 {required}";
-                Console.Error.WriteLine($"[compose] attempt {attempt}: obstacle={lastObstacle}");
+                Console.Error.WriteLine(
+                    $"[compose] attempt {attempt}: 模板#{templateIndex}({CountPigs(chosen)}猪)对称{symmetry} 数量未过({lastObstacle})");
+                continue;
+            }
+
+            // 质量门自查（与流水线 QualityErrors 同一份标准，环内提前拦截，不合格不烧候选预算）
+            var qualityErrors = PiggyFarmQuality.Errors(json);
+            if (qualityErrors.Count > 0)
+            {
+                lastObstacle = string.Join("；", qualityErrors.Take(2));
+                Console.Error.WriteLine(
+                    $"[compose] attempt {attempt}: 模板#{templateIndex}({CountPigs(chosen)}猪)对称{symmetry} 质量未过({lastObstacle})");
                 continue;
             }
 
@@ -131,6 +151,8 @@ public static class PiggyFarmComposer
             if (outcome.Status != SolveStatus.Solved)
             {
                 lastObstacle = "布点后不可解(" + outcome.Status + ", len=" + outcome.Solution.Count + ")";
+                Console.Error.WriteLine(
+                    $"[compose] attempt {attempt}: 模板#{templateIndex}({CountPigs(chosen)}猪)对称{symmetry} 判解未过({lastObstacle})");
                 continue;
             }
             var weights = PiggyFarmContent.Weights;
@@ -142,6 +164,8 @@ public static class PiggyFarmComposer
                 return ComposeResult.Ok(json);
             }
             lastObstacle = $"布点后判档 {outBand} ≠ 目标 {band}";
+            Console.Error.WriteLine(
+                $"[compose] attempt {attempt}: 模板#{templateIndex}({CountPigs(chosen)}猪)对称{symmetry} 判档未过({lastObstacle})");
         }
 
         if (req.Types.Count > 0)
@@ -157,7 +181,13 @@ public static class PiggyFarmComposer
         {
             return ComposeResult.Reject($"目标 {band} 档物理容量最多 {templates.Max(t => CountPigs(t))} 只；要求 {required} 只，请换档或降低数量");
         }
-        var fallback = TransformTemplate(templates[0], levelNumber, band.Value, 0, random);
+        // 兜底也必须随种子变化（2026-11-16 分析：固定 templates[0]+对称0 曾让批量/重试产出全文级雷同）。
+        // 模板仍取 templates[0]（判档最稳，避免兜底产出偏离目标档），但对称与删猪随种子变化——
+        // 对称不改变解长，删猪幅度受档位余量约束，流水线判档仍是最后一道闸。
+        var fallbackNode = JsonNode.Parse(TransformTemplate(templates[0], levelNumber, band.Value, random.Next(4)))!;
+        DeleteRandomPigs(fallbackNode, random, required);
+        FinalizeExport(fallbackNode, $"v2-template-{band.Value}档-{fallbackNode["pigs"]!.AsArray().Count}猪");
+        var fallback = fallbackNode.ToJsonString();
         return PiggyFarmLevels.Validate(fallback).Count > 0
             ? ComposeResult.Fail(PiggyFarmLevels.Validate(fallback))
             : ComposeResult.Ok(fallback);
@@ -580,9 +610,8 @@ public static class PiggyFarmComposer
         return Serialize(levelNumber, 1, pigs, "v1-module-1档");
     }
 
-    // 真实模板：重设 levelId/difficulty/levelName，按种子做四种对称变换（保持 12×19 与可解性）
-    private static string TransformTemplate(
-        string templateJson, string? levelNumber, int band, int symmetry, Random random)
+    // 真实模板：重设 levelId/difficulty/levelName，按对称参数做四种变换之一（保持 12×19 与可解性）
+    private static string TransformTemplate(string templateJson, string? levelNumber, int band, int symmetry)
     {
         var node = JsonNode.Parse(templateJson)!;
         var pigs = node["pigs"]!.AsArray();
@@ -618,6 +647,69 @@ public static class PiggyFarmComposer
         return node.ToJsonString();
     }
 
+    // 随机删猪变异：整只删除 0~8 只（保底 floorPigs 只不得低于；floorPigs<0 = 本轮不删）。
+    // 删除后重编号 id 并同步 pigCount——id 留空洞会破坏校验器与游戏端口径。
+    // 删猪让解变短、分数走低，由调用方的判档闸把关；幅度上限 8 是 10.28 实测过的档位安全余量。
+    private static void DeleteRandomPigs(JsonNode level, Random random, int floorPigs)
+    {
+        if (floorPigs < 0) return;
+        var pigs = level["pigs"]!.AsArray();
+        var room = pigs.Count - floorPigs;
+        if (room <= 0) return;
+        var delete = Math.Min(room, random.Next(9));
+        for (var i = 0; i < delete; i++)
+        {
+            pigs.RemoveAt(random.Next(pigs.Count));
+        }
+        for (var i = 0; i < pigs.Count; i++)
+        {
+            pigs[i]!["id"] = i;
+        }
+        level["pigCount"] = pigs.Count;
+    }
+
+    // 最终导出规范化（对齐项目主线契约，2026-11-16 外部分析指南）：
+    // ①pigs[i].id = 数组索引——generate.ps1 硬性要求；此前纯度剥离只更新 pigCount 不重编号，
+    //   曾产出 ID 缺口 37..52 的关卡被项目校验拒绝（"pigs[37].id must equal its array index"）
+    // ②pigCount = 最终地面数组长度
+    // ③显式补齐缺省结构 terrainElements=[] 与 specialData（rabbit 全 0 + pigSkin None/0）——
+    //   旧数据可缺省由 generate.ps1 临时补齐，但新导出应输出完整对象；已有合法配置原样保留
+    // ④levelName 非空时按最终数量重写（模板名含猪数，剥离/删猪后曾与实际不符）；null = 保留现名（1 档模块名）
+    private static void FinalizeExport(JsonNode node, string? levelName)
+    {
+        var pigs = node["pigs"]!.AsArray();
+        for (var i = 0; i < pigs.Count; i++)
+        {
+            pigs[i]!["id"] = i;
+        }
+        node["pigCount"] = pigs.Count;
+        if (node["terrainElements"] is null)
+        {
+            node["terrainElements"] = new JsonArray();
+        }
+        if (node["specialData"] is null)
+        {
+            node["specialData"] = new JsonObject
+            {
+                ["rabbit"] = new JsonObject
+                {
+                    ["firstAppearStep"] = 0,
+                    ["subsequentAppearStep"] = 0,
+                    ["rabbitCountPerWave"] = 0,
+                },
+                ["pigSkin"] = new JsonObject
+                {
+                    ["skinType"] = "None",
+                    ["skinRatio"] = 0.0,
+                },
+            };
+        }
+        if (levelName is not null)
+        {
+            node["levelName"] = levelName;
+        }
+    }
+
     private static string Serialize(string? levelNumber, int band, JsonArray pigs, string name)
     {
         var node = new JsonObject
@@ -630,6 +722,20 @@ public static class PiggyFarmComposer
             ["pigCount"] = pigs.Count,
             ["pigs"] = pigs,
             ["terrainElements"] = new JsonArray(),
+            ["specialData"] = new JsonObject
+            {
+                ["rabbit"] = new JsonObject
+                {
+                    ["firstAppearStep"] = 0,
+                    ["subsequentAppearStep"] = 0,
+                    ["rabbitCountPerWave"] = 0,
+                },
+                ["pigSkin"] = new JsonObject
+                {
+                    ["skinType"] = "None",
+                    ["skinRatio"] = 0.0,
+                },
+            },
         };
         return node.ToJsonString();
     }

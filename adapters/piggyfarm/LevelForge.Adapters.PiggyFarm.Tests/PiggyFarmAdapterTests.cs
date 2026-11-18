@@ -347,9 +347,10 @@ public sealed class PiggyFarmComposerTests
         var (facade, json) = Compose(2);
         Assert.Empty(facade.FormatErrors(json));
         Assert.Empty(facade.QualityErrors(json));
-        // 无类型需求 = 自由生成：模板池全部真实关卡（Level374/DuckB2/424B2/024B2/014B2/194B2）皆可
+        // 无类型需求 = 自由生成：模板池全部真实关卡（Level374/DuckB2/424B2/024B2/014B2/194B2/BoomB2）皆可；
+        // 2026-11-16 起恢复随机删猪变异（0~8 只），最小池成员 024B2(74 只) 删 8 → 下界 66
         var level = PiggyFarmLevels.Load(json);
-        Assert.InRange(level.Pigs.Count, 70, 99);
+        Assert.InRange(level.Pigs.Count, 60, 99);
 
         var outcome = facade.Solve(new SolveCommand(json, Encoding.UTF8.GetBytes(json), "compose-2",
             TimeSpan.FromSeconds(20)));
@@ -398,6 +399,106 @@ public sealed class PiggyFarmComposerVariationTests
         Assert.NotEqual(a.LevelJson, b.LevelJson);
         Assert.Empty(facade.QualityErrors(a.LevelJson!));
         Assert.Empty(facade.QualityErrors(b.LevelJson!));
+    }
+
+    // 回归（2026-11-16 批量雷同分析）：同编号+同要求、只换种子，几何必须真正变化——
+    // 旧实现 levelId 随编号变化就能骗过 NotEqual，这里对"去掉 levelId 的猪阵列"断言多样性。
+    // 固定 5 个种子，结果是确定性的：断言 ≥3 种不同几何（模板×对称×删猪的组合空间远大于此）。
+    [Fact]
+    public void 多种子生成几何分布不塌缩()
+    {
+        var facade = new PiggyFarmFacade();
+        var geometries = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var seed in new[] { 11, 22, 33, 44, 55 })
+        {
+            var result = facade.Compose("""{"band":2}""", "601", new ComposeContext("601", 2, null, seed));
+            Assert.True(result.LevelJson is not null, $"seed={seed} errors={string.Join("|", result.Errors)}");
+            var node = System.Text.Json.Nodes.JsonNode.Parse(result.LevelJson!)!;
+            node["levelId"] = 0;
+            node["levelName"] = "";
+            geometries.Add(node.ToJsonString());
+        }
+        Assert.True(geometries.Count >= 3, $"5 个种子只得到 {geometries.Count} 种几何（多样性塌缩）");
+    }
+
+    // 随机删猪变异必须尊重需求下限：要求 ≥70 只时，任何种子产出的关都不低于 70 只
+    [Fact]
+    public void 删猪变异不突破需求下限()
+    {
+        var facade = new PiggyFarmFacade();
+        foreach (var seed in new[] { 1, 2, 3, 4, 5, 6, 7, 8 })
+        {
+            var result = facade.Compose(
+                """{"band":2}""", "701", new ComposeContext("701", 2, "至少包含70只猪", seed));
+            Assert.True(result.LevelJson is not null, $"seed={seed} errors={string.Join("|", result.Errors)}");
+            var level = PiggyFarmLevels.Load(result.LevelJson!);
+            Assert.True(level.Pigs.Count >= 70, $"seed={seed} 产出 {level.Pigs.Count} 只 < 需求 70");
+            Assert.Empty(facade.FormatErrors(result.LevelJson!));
+        }
+    }
+
+    // 回归（2026-11-16 外部分析：用户 81 猪样本被游戏 generate.ps1 拒绝于 "pigs[37].id must equal its
+    // array index"）：僵尸需求触发纯度剥离后，最终数组必须重编号；缺省结构必须显式补齐；名称用最终数量。
+    // 种子 1..12 中多数会命中含非允许特殊猪的模板（剥离路径），少数走无剥离路径——两条路都断言同一契约。
+    [Fact]
+    public void 剥离与删猪后导出契约_重编号_数量_缺省结构()
+    {
+        var facade = new PiggyFarmFacade();
+        foreach (var seed in new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 })
+        {
+            var result = facade.Compose(
+                """{"band":2}""", "500", new ComposeContext("500", 2, "至少包含3只僵尸猪", seed));
+            Assert.True(result.LevelJson is not null, $"seed={seed} errors={string.Join("|", result.Errors)}");
+            var json = result.LevelJson!;
+
+            // 游戏侧第一条硬性校验：pigs[i].id == i（新版校验器同口径，id 缺口在这里直接红）
+            Assert.Empty(facade.FormatErrors(json));
+
+            var node = System.Text.Json.Nodes.JsonNode.Parse(json)!;
+            var pigs = node["pigs"]!.AsArray();
+            for (var i = 0; i < pigs.Count; i++)
+            {
+                Assert.Equal(i, pigs[i]!["id"]!.GetValue<int>());
+            }
+            // pigCount = 最终数组长度
+            Assert.Equal(pigs.Count, node["pigCount"]!.GetValue<int>());
+            // 缺省结构显式存在（terrainElements/specialData）
+            Assert.NotNull(node["terrainElements"]);
+            var special = node["specialData"]!;
+            Assert.Equal(0, special["rabbit"]!["firstAppearStep"]!.GetValue<int>());
+            Assert.Equal("None", special["pigSkin"]!["skinType"]!.GetValue<string>());
+            // 名称中的猪数 = 实际数量（旧样本名 97猪/实际 81 的失真不复现）
+            var name = node["levelName"]!.GetValue<string>();
+            Assert.Contains($"-{pigs.Count}猪", name);
+            // 需求生效：3 只僵尸猪
+            Assert.True(pigs.Count(p => (p?["pigType"]?.GetValue<string>()) == "Zombie") >= 3,
+                $"seed={seed} 僵尸猪数量不足");
+        }
+    }
+
+    // 校验器与项目 generate.ps1 同口径：id 不等于数组索引 = 格式错误（此前只查唯一性，漏放）
+    [Fact]
+    public void 校验器拒绝猪ID与数组索引不一致()
+    {
+        var facade = new PiggyFarmFacade();
+        var ok = facade.Compose("""{"band":2}""", "800", new ComposeContext("800", 2, null, 5));
+        Assert.NotNull(ok.LevelJson);
+        var node = System.Text.Json.Nodes.JsonNode.Parse(ok.LevelJson)!;
+        var pigs = node["pigs"]!.AsArray();
+        Assert.True(pigs.Count >= 2, "测试前提：模板输出至少 2 只猪");
+        pigs[1]!["id"] = 100;   // 人为制造 ID 缺口
+        var errors = facade.FormatErrors(node.ToJsonString());
+        Assert.Contains(errors, e => e.Contains("数组索引"));
+    }
+
+    // 项目主线管线要求六位零填充文件名（000500.json），落盘引擎按门面口径命名
+    [Fact]
+    public void 关卡文件名为六位零填充()
+    {
+        var facade = new PiggyFarmFacade();
+        Assert.Equal("000500.json", facade.LevelFileName("500"));
+        Assert.Equal("000001.json", facade.LevelFileName("1"));
+        Assert.Equal("000499.json", facade.LevelFileName("499"));
     }
 
     [Fact]
@@ -674,7 +775,7 @@ public sealed class PiggyFarmDuckRuleTests
     [Fact]
     public void 解析_Duck单格脚印合法()
     {
-        var json = Level(Duck(2, 3, 3));
+        var json = Level(Duck(0, 3, 3));
         Assert.Empty(new PiggyFarmFacade().FormatErrors(json));
         Assert.Equal("Duck", PiggyFarmLevels.Load(json).Pigs.Single().Type);
     }
@@ -683,27 +784,27 @@ public sealed class PiggyFarmDuckRuleTests
     public void 解析_Duck多格脚印拒绝()
     {
         // 两格脚印的小黄鸭：脚印几何与 1×1 不一致 → 校验拒绝
-        var bad = Level(Duck(2, 3, 3) + "," + Pig(1, "Up", (5, 0), (5, 1))).Replace(
-            """{"id":2,"facing":"Up","pigType":"Duck","specialInfo":"","occupiedCells":[{"x":3,"y":3}]}""",
-            """{"id":2,"facing":"Up","pigType":"Duck","specialInfo":"","occupiedCells":[{"x":3,"y":3},{"x":3,"y":4}]}""");
+        var bad = Level(Duck(0, 3, 3) + "," + Pig(1, "Up", (5, 0), (5, 1))).Replace(
+            """{"id":0,"facing":"Up","pigType":"Duck","specialInfo":"","occupiedCells":[{"x":3,"y":3}]}""",
+            """{"id":0,"facing":"Up","pigType":"Duck","specialInfo":"","occupiedCells":[{"x":3,"y":3},{"x":3,"y":4}]}""");
         Assert.Contains(new PiggyFarmFacade().FormatErrors(bad), e => e.Contains("脚印"));
     }
 
     [Fact]
     public void 规则_鸭子不在合法动作中()
     {
-        var state = LoadState(Pig(1, "Right", (0, 2), (1, 2)) + "," + Duck(2, 5, 5));
+        var state = LoadState(Pig(0, "Right", (0, 2), (1, 2)) + "," + Duck(1, 5, 5));
         var moves = Adapter.GetLegalMoves(state);
-        Assert.Contains(moves, m => m.PigId == 1);
-        Assert.DoesNotContain(moves, m => m.PigId == 2);
+        Assert.Contains(moves, m => m.PigId == 0);
+        Assert.DoesNotContain(moves, m => m.PigId == 1);
     }
 
     [Fact]
     public void 规则_普通猪离场后可达鸭子自动离场()
     {
-        // #1 朝右一路滑出右边界 → 离场事件 → 鸭子 (5,5) 可达边界 → 自动离场 → 清场胜利
-        var state = LoadState(Pig(1, "Right", (0, 2), (1, 2)) + "," + Duck(2, 5, 5));
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        // #0 朝右一路滑出右边界 → 离场事件 → 鸭子 (5,5) 可达边界 → 自动离场 → 清场胜利
+        var state = LoadState(Pig(0, "Right", (0, 2), (1, 2)) + "," + Duck(1, 5, 5));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
         Assert.Empty(next.Pigs);
         Assert.True(Adapter.IsGoal(next));
     }
@@ -713,14 +814,14 @@ public sealed class PiggyFarmDuckRuleTests
     {
         // 鸭子 (2,2) 四面被 1x2 猪围死（四只猪都朝向鸭子 → 全部被鸭挡住，只能顶撞）
         var layout = string.Join(",",
-            Pig(1, "Right", (0, 2), (1, 2)),   // 左：前进一步 = (2,2) 鸭 → 顶撞
-            Pig(3, "Left", (3, 2), (4, 2)),    // 右：前进一步 = (2,2) 鸭 → 顶撞
-            Pig(4, "Down", (2, 0), (2, 1)),    // 上：前进一步 = (2,2) 鸭 → 顶撞
-            Pig(5, "Up", (2, 3), (2, 4)),      // 下：前进一步 = (2,2) 鸭 → 顶撞
-            Duck(2, 2, 2));
+            Pig(0, "Right", (0, 2), (1, 2)),   // 左：前进一步 = (2,2) 鸭 → 顶撞
+            Pig(1, "Left", (3, 2), (4, 2)),    // 右：前进一步 = (2,2) 鸭 → 顶撞
+            Pig(2, "Down", (2, 0), (2, 1)),    // 上：前进一步 = (2,2) 鸭 → 顶撞
+            Pig(3, "Up", (2, 3), (2, 4)),      // 下：前进一步 = (2,2) 鸭 → 顶撞
+            Duck(4, 2, 2));
         var state = LoadState(layout);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));   // 顶撞事件
-        Assert.Contains(next.Pigs, p => p.Id == 2);                  // 鸭子无通路，留下
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));   // 顶撞事件
+        Assert.Contains(next.Pigs, p => p.Id == 4);                  // 鸭子无通路，留下
         Assert.False(Adapter.IsGoal(next));
     }
 
@@ -730,15 +831,15 @@ public sealed class PiggyFarmDuckRuleTests
         // 口袋唯一开口朝下，且鸭子 B(2,3) 正好堵在鸭子 A(2,2) 的通路上——
         // BFS 把其它鸭子视为空 → A 经 B 的格直下出界，B 亦可达 → 两只都离场
         var layout = string.Join(",",
-            Pig(1, "Right", (0, 2), (1, 2)),   // 左墙（朝右被鸭 A 挡）
-            Pig(11, "Right", (0, 3), (1, 3)),  // 左墙下段（朝右被鸭 B 挡）
-            Pig(3, "Left", (3, 2), (4, 2)),    // 右墙（朝左被鸭 A 挡）
-            Pig(31, "Left", (3, 3), (4, 3)),   // 右墙下段（朝左被鸭 B 挡）
+            Pig(0, "Right", (0, 2), (1, 2)),   // 左墙（朝右被鸭 A 挡）
+            Pig(1, "Right", (0, 3), (1, 3)),   // 左墙下段（朝右被鸭 B 挡）
+            Pig(2, "Left", (3, 2), (4, 2)),    // 右墙（朝左被鸭 A 挡）
+            Pig(3, "Left", (3, 3), (4, 3)),    // 右墙下段（朝左被鸭 B 挡）
             Pig(4, "Down", (2, 0), (2, 1)),    // 顶墙（朝下被鸭 A 挡）
-            Duck(2, 2, 2),
+            Duck(5, 2, 2),
             Duck(6, 2, 3));
         var state = LoadState(layout, width: 5, height: 6);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));   // 任一顶撞事件
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));   // 任一顶撞事件
         Assert.DoesNotContain(next.Pigs, p => p.Type == "Duck");     // 两只鸭子都离场
         Assert.Equal(5, next.Pigs.Count);                            // 只剩四面墙
     }
@@ -746,39 +847,39 @@ public sealed class PiggyFarmDuckRuleTests
     [Fact]
     public void 规则_顶撞事件触发可达鸭子离场()
     {
-        // #1 被墙猪 #2 挡住（顶撞），鸭子 (4,4) 可达边界——顶撞事件 → 鸭子离场
+        // #0 被墙猪 #1 挡住（顶撞），鸭子 (4,4) 可达边界——顶撞事件 → 鸭子离场
         var layout = string.Join(",",
-            Pig(1, "Right", (0, 2), (1, 2)),
-            Pig(2, "Up", (2, 2), (2, 3)),
-            Duck(4, 4, 4));
+            Pig(0, "Right", (0, 2), (1, 2)),
+            Pig(1, "Up", (2, 2), (2, 3)),
+            Duck(2, 4, 4));
         var state = LoadState(layout);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
         Assert.DoesNotContain(next.Pigs, p => p.Type == "Duck");
-        Assert.Contains(next.Pigs, p => p.Id == 2);
+        Assert.Contains(next.Pigs, p => p.Id == 1);
     }
 
     [Fact]
     public void 规则_顶撞爆炸猪_阻挡方计数递减()
     {
         var layout = string.Join(",",
-            Pig(1, "Right", (0, 2), (1, 2)),
-            Pig(2, "Down", (2, 2), (2, 3), type: "Boom"));   // 爆炸猪挡在 #1 前方
+            Pig(0, "Right", (0, 2), (1, 2)),
+            Pig(1, "Down", (2, 2), (2, 3), type: "Boom"));   // 爆炸猪挡在 #0 前方
         var state = LoadState(layout);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
         Assert.False(next.Failed);
-        Assert.Equal(2, next.Pigs.Single(p => p.Id == 2).Counter);
+        Assert.Equal(2, next.Pigs.Single(p => p.Id == 1).Counter);
     }
 
     [Fact]
     public void 规则_爆炸猪顶撞_自身计数递减()
     {
         var layout = string.Join(",",
-            Pig(3, "Left", (2, 2), (3, 2)),
-            Pig(2, "Right", (0, 2), (1, 2), type: "Boom"));   // 爆炸猪 #2 朝右被 #3 挡
+            Pig(0, "Left", (2, 2), (3, 2)),
+            Pig(1, "Right", (0, 2), (1, 2), type: "Boom"));   // 爆炸猪 #1 朝右被 #0 挡
         var state = LoadState(layout);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(2));   // 爆炸猪顶撞 → 自身计数 -1
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));   // 爆炸猪顶撞 → 自身计数 -1
         Assert.False(next.Failed);
-        Assert.Equal(2, next.Pigs.Single(p => p.Id == 2).Counter);
+        Assert.Equal(2, next.Pigs.Single(p => p.Id == 1).Counter);
     }
 }
 
@@ -807,7 +908,7 @@ public sealed class PiggyFarmZombieRuleTests
     [Fact]
     public void 解析_Zombie脚印与普通猪同形合法()
     {
-        var json = Level(Zombie(1, "Right", (0, 2), (1, 2)));
+        var json = Level(Zombie(0, "Right", (0, 2), (1, 2)));
         Assert.Empty(new PiggyFarmFacade().FormatErrors(json));
         Assert.Equal("Zombie", PiggyFarmLevels.Load(json).Pigs.Single().Type);
     }
@@ -816,9 +917,9 @@ public sealed class PiggyFarmZombieRuleTests
     public void 规则_丧尸走位离场与普通猪完全一致()
     {
         // 丧尸朝右、前方畅通 → 滑行出右边界；丧尸计入清场
-        var state = LoadState(Zombie(1, "Right", (0, 2), (1, 2)));
-        Assert.Contains(new PiggyFarmMove(1), Adapter.GetLegalMoves(state));
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        var state = LoadState(Zombie(0, "Right", (0, 2), (1, 2)));
+        Assert.Contains(new PiggyFarmMove(0), Adapter.GetLegalMoves(state));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
         Assert.Empty(next.Pigs);
         Assert.True(Adapter.IsGoal(next));
     }
@@ -826,21 +927,21 @@ public sealed class PiggyFarmZombieRuleTests
     [Fact]
     public void 规则_普通猪滑行撞上丧尸_普通猪被感染()
     {
-        // #1 普通猪朝右滑行，(3,2) 处被丧尸 #2 挡住 → 接触结算 → #1 转为丧尸
-        var state = LoadState(Pig(1, "Right", (0, 2), (1, 2)) + "," + Zombie(2, "Right", (3, 2), (4, 2)));
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        // #0 普通猪朝右滑行，(3,2) 处被丧尸 #1 挡住 → 接触结算 → #0 转为丧尸
+        var state = LoadState(Pig(0, "Right", (0, 2), (1, 2)) + "," + Zombie(1, "Right", (3, 2), (4, 2)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        Assert.Equal("Zombie", next.Pigs.Single(p => p.Id == 0).Type);
         Assert.Equal("Zombie", next.Pigs.Single(p => p.Id == 1).Type);
-        Assert.Equal("Zombie", next.Pigs.Single(p => p.Id == 2).Type);
         Assert.False(next.Failed);
     }
 
     [Fact]
     public void 规则_丧尸滑行撞上普通猪_普通猪被感染()
     {
-        // 丧尸 #1 朝右滑行撞上普通猪 #2 → #2 转为丧尸（且不判负——感染只影响奖励）
-        var state = LoadState(Zombie(1, "Right", (0, 2), (1, 2)) + "," + Pig(2, "Right", (3, 2), (4, 2)));
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        Assert.Equal("Zombie", next.Pigs.Single(p => p.Id == 2).Type);
+        // 丧尸 #0 朝右滑行撞上普通猪 #1 → #1 转为丧尸（且不判负——感染只影响奖励）
+        var state = LoadState(Zombie(0, "Right", (0, 2), (1, 2)) + "," + Pig(1, "Right", (3, 2), (4, 2)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        Assert.Equal("Zombie", next.Pigs.Single(p => p.Id == 1).Type);
         Assert.False(next.Failed);
     }
 
@@ -848,29 +949,29 @@ public sealed class PiggyFarmZombieRuleTests
     public void 规则_丧尸撞丧尸不感染_普通撞普通不感染()
     {
         // 两只丧尸贴脸互撞：无普通猪参与 → 无转化可言，类型保持
-        var zState = LoadState(Zombie(1, "Right", (0, 2), (1, 2)) + "," + Zombie(2, "Left", (2, 2), (3, 2)));
-        var zNext = Adapter.ApplyMove(zState, new PiggyFarmMove(1));
+        var zState = LoadState(Zombie(0, "Right", (0, 2), (1, 2)) + "," + Zombie(1, "Left", (2, 2), (3, 2)));
+        var zNext = Adapter.ApplyMove(zState, new PiggyFarmMove(0));
         Assert.All(zNext.Pigs, p => Assert.Equal("Zombie", p.Type));
         // 两只普通猪贴脸互撞：无丧尸参与 → 类型保持
-        var nState = LoadState(Pig(1, "Right", (0, 2), (1, 2)) + "," + Pig(2, "Left", (2, 2), (3, 2)));
-        var nNext = Adapter.ApplyMove(nState, new PiggyFarmMove(1));
+        var nState = LoadState(Pig(0, "Right", (0, 2), (1, 2)) + "," + Pig(1, "Left", (2, 2), (3, 2)));
+        var nNext = Adapter.ApplyMove(nState, new PiggyFarmMove(0));
         Assert.All(nNext.Pigs, p => Assert.Equal("Normal", p.Type));
     }
 
     [Fact]
     public void 规则_感染是链式的_转化后的丧尸继续感染()
     {
-        // 一排三只（宽 8）：丧尸 #1(0,2)-(1,2) 朝右 → 普通猪 #2(3,2)-(4,2) → 普通猪 #3(5,2)-(6,2)
-        // 第一步 #1 滑行撞 #2 → #2 感染；第二步 #2 朝右被 #3 挡（顶撞）→ #3 感染
+        // 一排三只（宽 8）：丧尸 #0(0,2)-(1,2) 朝右 → 普通猪 #1(3,2)-(4,2) → 普通猪 #2(5,2)-(6,2)
+        // 第一步 #0 滑行撞 #1 → #1 感染；第二步 #1 朝右被 #2 挡（顶撞）→ #2 感染
         var state = LoadState(
-            Zombie(1, "Right", (0, 2), (1, 2)) + "," +
-            Pig(2, "Right", (3, 2), (4, 2)) + "," +
-            Pig(3, "Right", (5, 2), (6, 2)));
-        var after1 = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        Assert.Equal("Zombie", after1.Pigs.Single(p => p.Id == 2).Type);
-        Assert.Equal("Normal", after1.Pigs.Single(p => p.Id == 3).Type);
-        var after2 = Adapter.ApplyMove(after1, new PiggyFarmMove(2));   // #2 被挡 → 顶撞 #3 → 感染
-        Assert.Equal("Zombie", after2.Pigs.Single(p => p.Id == 3).Type);
+            Zombie(0, "Right", (0, 2), (1, 2)) + "," +
+            Pig(1, "Right", (3, 2), (4, 2)) + "," +
+            Pig(2, "Right", (5, 2), (6, 2)));
+        var after1 = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        Assert.Equal("Zombie", after1.Pigs.Single(p => p.Id == 1).Type);
+        Assert.Equal("Normal", after1.Pigs.Single(p => p.Id == 2).Type);
+        var after2 = Adapter.ApplyMove(after1, new PiggyFarmMove(1));   // #1 被挡 → 顶撞 #2 → 感染
+        Assert.Equal("Zombie", after2.Pigs.Single(p => p.Id == 2).Type);
     }
 }
 
@@ -902,7 +1003,7 @@ public sealed class PiggyFarmSpringRuleTests
     [Fact]
     public void 解析_Spring双格脚印合法()
     {
-        var json = Level(Spring(1, "Right", (0, 2), (1, 2)));
+        var json = Level(Spring(0, "Right", (0, 2), (1, 2)));
         Assert.Empty(new PiggyFarmFacade().FormatErrors(json));
         Assert.Equal("Spring", PiggyFarmLevels.Load(json).Pigs.Single().Type);
     }
@@ -911,8 +1012,8 @@ public sealed class PiggyFarmSpringRuleTests
     public void 规则_弹簧滑行离场与普通猪一致()
     {
         // 前方畅通 → 正常滑行离场（弹回只在猪接触时发生，撞墙不弹）
-        var state = LoadState(Spring(1, "Right", (0, 2), (1, 2)));
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        var state = LoadState(Spring(0, "Right", (0, 2), (1, 2)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
         Assert.Empty(next.Pigs);
         Assert.True(Adapter.IsGoal(next));
     }
@@ -920,18 +1021,18 @@ public sealed class PiggyFarmSpringRuleTests
     [Fact]
     public void 规则_弹簧滑行被挡_弹回起始格且阻挡爆炸猪计数递减()
     {
-        // 弹簧 #1 朝右滑行，(4,2) 处被爆炸猪 #2 挡住 → 接触结算：
+        // 弹簧 #0 朝右滑行，(4,2) 处被爆炸猪 #1 挡住 → 接触结算：
         // 阻挡方爆炸计数 3→2（碰撞事件照常触发），弹簧弹回起始格 (0,2)-(1,2)
         var layout = string.Join(",",
-            Spring(1, "Right", (0, 2), (1, 2)),
-            Pig(2, "Left", (4, 2), (5, 2), type: "Boom"));
+            Spring(0, "Right", (0, 2), (1, 2)),
+            Pig(1, "Left", (4, 2), (5, 2), type: "Boom"));
         var state = LoadState(layout);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        var spring = next.Pigs.Single(p => p.Id == 1);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        var spring = next.Pigs.Single(p => p.Id == 0);
         Assert.Equal("Spring", spring.Type);
         Assert.Equal((0, 2), (spring.Cells[0].X, spring.Cells[0].Y));   // 弹回起始格
         Assert.Equal((1, 2), (spring.Cells[1].X, spring.Cells[1].Y));
-        Assert.Equal(2, next.Pigs.Single(p => p.Id == 2).Counter);     // 阻挡方爆炸计数递减
+        Assert.Equal(2, next.Pigs.Single(p => p.Id == 1).Counter);     // 阻挡方爆炸计数递减
         Assert.False(next.Failed);
     }
 
@@ -940,13 +1041,13 @@ public sealed class PiggyFarmSpringRuleTests
     {
         // 弹簧被普通猪挡住 → 弹回起始格；普通猪保持原位（弹簧不推挤阻挡方）
         var layout = string.Join(",",
-            Spring(1, "Right", (0, 2), (1, 2)),
-            Pig(2, "Left", (4, 2), (5, 2)));
+            Spring(0, "Right", (0, 2), (1, 2)),
+            Pig(1, "Left", (4, 2), (5, 2)));
         var state = LoadState(layout);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        var spring = next.Pigs.Single(p => p.Id == 1);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        var spring = next.Pigs.Single(p => p.Id == 0);
         Assert.Equal((0, 2), (spring.Cells[0].X, spring.Cells[0].Y));
-        var other = next.Pigs.Single(p => p.Id == 2);
+        var other = next.Pigs.Single(p => p.Id == 1);
         Assert.Equal((4, 2), (other.Cells[0].X, other.Cells[0].Y));    // 阻挡方未位移
     }
 
@@ -955,12 +1056,12 @@ public sealed class PiggyFarmSpringRuleTests
     {
         // 起步即碰撞（零距离）：无位移、事件照常触发（阻挡爆炸猪计数递减）
         var layout = string.Join(",",
-            Spring(1, "Right", (0, 2), (1, 2)),
-            Pig(2, "Left", (2, 2), (3, 2), type: "Boom"));
+            Spring(0, "Right", (0, 2), (1, 2)),
+            Pig(1, "Left", (2, 2), (3, 2), type: "Boom"));
         var state = LoadState(layout);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        Assert.Equal(2, next.Pigs.Single(p => p.Id == 2).Counter);
-        var spring = next.Pigs.Single(p => p.Id == 1);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        Assert.Equal(2, next.Pigs.Single(p => p.Id == 1).Counter);
+        var spring = next.Pigs.Single(p => p.Id == 0);
         Assert.Equal((0, 2), (spring.Cells[0].X, spring.Cells[0].Y));
     }
 
@@ -969,11 +1070,11 @@ public sealed class PiggyFarmSpringRuleTests
     {
         // 弹簧顶撞事件 → 鸭子（可达边界）自动离场——弹回虽然无位移，碰撞事件照常广播
         var layout = string.Join(",",
-            Spring(1, "Right", (0, 2), (1, 2)),
-            Pig(2, "Left", (2, 2), (3, 2)),
-            Duck(4, 5, 5));
+            Spring(0, "Right", (0, 2), (1, 2)),
+            Pig(1, "Left", (2, 2), (3, 2)),
+            Duck(2, 5, 5));
         var state = LoadState(layout);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
         Assert.DoesNotContain(next.Pigs, p => p.Type == "Duck");
     }
 
@@ -1029,13 +1130,13 @@ public sealed class PiggyFarmScissorsBalloonRuleTests
     [Fact]
     public void 解析_剪刀气球颜色解析_非法颜色按未就绪容忍()
     {
-        var json = Level(Scissors(1, "Right", (0, 2), (1, 2), 1) + "," + Balloon(2, 2, (4, 4), (4, 5)));
+        var json = Level(Scissors(0, "Right", (0, 2), (1, 2), 1) + "," + Balloon(1, 2, (4, 4), (4, 5)));
         Assert.Empty(new PiggyFarmFacade().FormatErrors(json));
         var level = PiggyFarmLevels.Load(json);
         Assert.Equal(1, level.Pigs.Single(p => p.Type == "Scissors").Color);
         Assert.Equal(2, level.Pigs.Single(p => p.Type == "Balloon").Color);
         // 非法颜色：游戏侧容忍为"颜色未就绪"（-1），不拒绝——与游戏行为一致
-        var lenient = PiggyFarmLevels.Load(Level(Scissors(3, "Right", (0, 2), (1, 2), 9)));
+        var lenient = PiggyFarmLevels.Load(Level(Scissors(0, "Right", (0, 2), (1, 2), 9)));
         Assert.Equal(-1, lenient.Pigs.Single(p => p.Type == "Scissors").Color);
     }
 
@@ -1044,14 +1145,14 @@ public sealed class PiggyFarmScissorsBalloonRuleTests
     {
         // 气球绳 3 > 0：不在合法动作中；同排普通猪滑行贴脸停在气球左侧（系留气球是实体阻挡）
         var layout = string.Join(",",
-            Pig(1, "Right", (0, 2), (1, 2)),
-            Balloon(2, 0, (4, 2), (4, 3)));
+            Pig(0, "Right", (0, 2), (1, 2)),
+            Balloon(1, 0, (4, 2), (4, 3)));
         var state = LoadState(layout);
         var moves = Adapter.GetLegalMoves(state);
-        Assert.Contains(moves, m => m.PigId == 1);
-        Assert.DoesNotContain(moves, m => m.PigId == 2);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        var moved = next.Pigs.Single(p => p.Id == 1);
+        Assert.Contains(moves, m => m.PigId == 0);
+        Assert.DoesNotContain(moves, m => m.PigId == 1);
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        var moved = next.Pigs.Single(p => p.Id == 0);
         Assert.Equal((2, 2), (moved.Cells[0].X, moved.Cells[0].Y));
         Assert.Equal((3, 2), (moved.Cells[1].X, moved.Cells[1].Y));
     }
@@ -1059,21 +1160,21 @@ public sealed class PiggyFarmScissorsBalloonRuleTests
     [Fact]
     public void 规则_同色剪刀离场剪绳_普通猪离场不剪()
     {
-        var state = LoadState(Scissors(1, "Right", (0, 2), (1, 2), 0) + "," + Balloon(2, 0, (4, 4), (4, 5)));
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        Assert.Equal(2, next.Pigs.Single(p => p.Id == 2).Counter);   // 3 -> 2
+        var state = LoadState(Scissors(0, "Right", (0, 2), (1, 2), 0) + "," + Balloon(1, 0, (4, 4), (4, 5)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        Assert.Equal(2, next.Pigs.Single(p => p.Id == 1).Counter);   // 3 -> 2
 
-        var plain = LoadState(Pig(1, "Right", (0, 2), (1, 2)) + "," + Balloon(2, 0, (4, 4), (4, 5)));
-        var unchanged = Adapter.ApplyMove(plain, new PiggyFarmMove(1));
-        Assert.Equal(3, unchanged.Pigs.Single(p => p.Id == 2).Counter);   // 普通猪离场不剪绳
+        var plain = LoadState(Pig(0, "Right", (0, 2), (1, 2)) + "," + Balloon(1, 0, (4, 4), (4, 5)));
+        var unchanged = Adapter.ApplyMove(plain, new PiggyFarmMove(0));
+        Assert.Equal(3, unchanged.Pigs.Single(p => p.Id == 1).Counter);   // 普通猪离场不剪绳
     }
 
     [Fact]
     public void 规则_异色剪刀离场不剪绳()
     {
-        var state = LoadState(Scissors(1, "Right", (0, 2), (1, 2), 1) + "," + Balloon(2, 0, (4, 4), (4, 5)));
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        Assert.Equal(3, next.Pigs.Single(p => p.Id == 2).Counter);
+        var state = LoadState(Scissors(0, "Right", (0, 2), (1, 2), 1) + "," + Balloon(1, 0, (4, 4), (4, 5)));
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        Assert.Equal(3, next.Pigs.Single(p => p.Id == 1).Counter);
     }
 
     [Fact]
@@ -1081,28 +1182,28 @@ public sealed class PiggyFarmScissorsBalloonRuleTests
     {
         // 三只同色剪刀分别在 0/2/5 行离场 → 色气球 3 次剪绳 → 绳尽 → 进入合法动作（走位如普通猪）
         var layout = string.Join(",",
-            Scissors(1, "Right", (0, 0), (1, 0), 0),
-            Scissors(3, "Right", (0, 2), (1, 2), 0),
-            Scissors(5, "Right", (0, 5), (1, 5), 0),
-            Balloon(2, 0, (4, 3), (4, 4)));
+            Scissors(0, "Right", (0, 0), (1, 0), 0),
+            Scissors(1, "Right", (0, 2), (1, 2), 0),
+            Scissors(2, "Right", (0, 5), (1, 5), 0),
+            Balloon(3, 0, (4, 3), (4, 4)));
         var state = LoadState(layout);
-        var after1 = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        Assert.Equal(2, after1.Pigs.Single(p => p.Id == 2).Counter);
-        var after2 = Adapter.ApplyMove(after1, new PiggyFarmMove(3));
-        Assert.Equal(1, after2.Pigs.Single(p => p.Id == 2).Counter);
-        var after3 = Adapter.ApplyMove(after2, new PiggyFarmMove(5));
-        Assert.Equal(0, after3.Pigs.Single(p => p.Id == 2).Counter);
-        Assert.Contains(new PiggyFarmMove(2), Adapter.GetLegalMoves(after3));
+        var after1 = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        Assert.Equal(2, after1.Pigs.Single(p => p.Id == 3).Counter);
+        var after2 = Adapter.ApplyMove(after1, new PiggyFarmMove(1));
+        Assert.Equal(1, after2.Pigs.Single(p => p.Id == 3).Counter);
+        var after3 = Adapter.ApplyMove(after2, new PiggyFarmMove(2));
+        Assert.Equal(0, after3.Pigs.Single(p => p.Id == 3).Counter);
+        Assert.Contains(new PiggyFarmMove(3), Adapter.GetLegalMoves(after3));
     }
 
     [Fact]
     public void 规则_气球长猪5绳_同色剪刀逐次剪绳()
     {
         var layout = string.Join(",",
-            Scissors(1, "Right", (0, 2), (1, 2), 0),
-            "{\"id\":2,\"facing\":\"Up\",\"pigType\":\"BalloonLong\",\"specialInfo\":\"0\",\"occupiedCells\":[{\"x\":4,\"y\":4},{\"x\":4,\"y\":5},{\"x\":4,\"y\":6}]}");   // 1x3 脚印
+            Scissors(0, "Right", (0, 2), (1, 2), 0),
+            "{\"id\":1,\"facing\":\"Up\",\"pigType\":\"BalloonLong\",\"specialInfo\":\"0\",\"occupiedCells\":[{\"x\":4,\"y\":4},{\"x\":4,\"y\":5},{\"x\":4,\"y\":6}]}");   // 1x3 脚印
         var state = LoadState(layout, width: 8, height: 8);
-        var next = Adapter.ApplyMove(state, new PiggyFarmMove(1));
-        Assert.Equal(4, next.Pigs.Single(p => p.Id == 2).Counter);   // 5 -> 4
+        var next = Adapter.ApplyMove(state, new PiggyFarmMove(0));
+        Assert.Equal(4, next.Pigs.Single(p => p.Id == 1).Counter);   // 5 -> 4
     }
 }

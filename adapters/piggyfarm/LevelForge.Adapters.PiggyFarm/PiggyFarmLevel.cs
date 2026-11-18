@@ -185,7 +185,7 @@ public static class PiggyFarmLevels
                         index++;
                         continue;
                     }
-                    var pig = ParsePig(pigEl, prefix, width, height, ids, unsupported, errors);
+                    var pig = ParsePig(pigEl, prefix, index, width, height, ids, unsupported, errors);
                     if (pig is not null)
                     {
                         pigs.Add(pig);
@@ -220,8 +220,9 @@ public static class PiggyFarmLevels
     }
 
     // 解析单只猪：朝向、类型、脚印（矩形 + 尺寸与类型匹配 + 界内 + 无重复格）
+    // id 契约与项目 generate.ps1 同口径：pigs[i].id 必须等于数组索引 i（删除/剥离后必须重编号）
     private static PiggyFarmLevelPig? ParsePig(
-        JsonElement element, string prefix, int width, int height,
+        JsonElement element, string prefix, int arrayIndex, int width, int height,
         HashSet<int> ids, List<string> unsupported, List<string> errors)
     {
         var id = ReadInt(element, "id", errors, prefix);
@@ -230,6 +231,10 @@ public static class PiggyFarmLevels
             if (pigId < 0)
             {
                 errors.Add($"{prefix}.id 必须是非负整数（实际 {pigId}）");
+            }
+            else if (pigId != arrayIndex)
+            {
+                errors.Add($"{prefix}.id 必须等于数组索引 {arrayIndex}（实际 {pigId}；删除或剥离后须重编号）");
             }
             else if (!ids.Add(pigId))
             {

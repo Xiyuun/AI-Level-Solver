@@ -52,7 +52,7 @@ public sealed class LevelFileStore
             return Fail($"关卡编号含非法字符（只允许字母数字._-）：{levelId}");
         }
         var root = Path.GetFullPath(Path.Combine(_db.DataDir, facade.Registration.LevelsRootDir));
-        var target = Path.GetFullPath(Path.Combine(root, $"{levelId}.json"));
+        var target = Path.GetFullPath(Path.Combine(root, facade.LevelFileName(levelId)));
         if (!target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
         {
             return Fail("目标路径越出关卡根目录");   // 双保险：id 净化后不应触发
@@ -118,7 +118,7 @@ public sealed class LevelFileStore
     public byte[]? ReadCurrent(IGameFacade facade, string levelId)
     {
         if (!IsSafeLevelId(levelId)) return null;
-        var target = Path.Combine(_db.DataDir, facade.Registration.LevelsRootDir, $"{levelId}.json");
+        var target = Path.Combine(_db.DataDir, facade.Registration.LevelsRootDir, facade.LevelFileName(levelId));
         return _io.Exists(target) ? _io.ReadAllBytes(target) : null;
     }
 

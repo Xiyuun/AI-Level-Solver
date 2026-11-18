@@ -20,6 +20,10 @@ public interface IGameFacade
 
     string? TryGetLevelId(string levelJson);                     // 从原生 JSON 提取关卡编号；无该字段返回 null
 
+    // 关卡交付文件名：默认"编号.json"；项目管线对文件名有固定口径时由玩法覆写
+    // （如 piggyfarm 主线要求六位零填充 000500.json，generate.ps1 按文件名排序并要求连续编号）
+    string LevelFileName(string levelId) => $"{levelId}.json";
+
     IReadOnlyList<string> FormatErrors(string levelJson);        // 静态格式校验（接入产物校验器；生成端判卷第一步）
 
     PlatformSolve Solve(SolveCommand command);                   // 求解 + 制带 + 难度评估

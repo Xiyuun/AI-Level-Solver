@@ -48,6 +48,10 @@ public sealed class PiggyFarmFacade : IGameFacade, ILevelQualityGate, ILevelComp
         return PiggyFarmLevels.TryReadLevelId(levelJson)?.ToString();
     }
 
+    // 项目主线管线要求六位零填充文件名（000500.json）：generate.ps1 按文件名排序并要求 1..N 连续
+    public string LevelFileName(string levelId) =>
+        long.TryParse(levelId, out var id) ? $"{id:D6}.json" : $"{levelId}.json";
+
     // 静态格式校验（接入产物校验器）：只判格式与子集范围，不判可解性
     public IReadOnlyList<string> FormatErrors(string levelJson)
     {
@@ -73,39 +77,8 @@ public sealed class PiggyFarmFacade : IGameFacade, ILevelQualityGate, ILevelComp
     // 模板出题输出只是一个 {"band":N}，1k token 足够
     public int EstimateLevelTokens(string? levelNumber) => 1024;
 
-    // 生成质量门（仅作用于生成候选，不拦导入的真实关卡）：
-    // 格式合法 ≠ 设计可用——拦截"全部同朝向/独立直道/初始全可走"的规则网格。
-    public IReadOnlyList<string> QualityErrors(string levelJson)
-    {
-        var format = PiggyFarmLevels.Validate(levelJson);
-        if (format.Count > 0) return format;   // 格式问题交给 FormatErrors 处理，这里不重复报
-        var level = PiggyFarmLevels.Load(levelJson);
-        var pigs = level.Pigs;
-        var errors = new List<string>();
-
-        var facings = pigs.Select(p => p.Facing).Distinct().Count();
-        if (pigs.Count >= 8 && facings < 3)
-        {
-            errors.Add($"朝向过少：{pigs.Count} 只猪只有 {facings} 种朝向（至少 3 种；禁止全部同向/单排直道）");
-        }
-
-        var state = AdapterInstance.LoadLevel(level);
-        // "可直接起步" = 能沿朝向滑行（不含原地顶撞——顶撞是 v1.1 起的合法动作，但不代表该猪未被阻挡）
-        // 小黄鸭不可点击，也不计入起步
-        var legal = state.Pigs.Count(p => p.Type != "Duck" && PiggyFarmAdapter.CanAdvance(state, p));
-        if (pigs.Count >= 8 && legal * 2 > pigs.Count)
-        {
-            errors.Add($"初始可走猪过多：{legal}/{pigs.Count} 只可直接起步（需 ≤50%，要有阻挡依赖）");
-        }
-        var blocked = pigs.Count - legal;
-        var requiredBlocked = Math.Max(2, pigs.Count / 5);
-        if (pigs.Count >= 8 && blocked < requiredBlocked)
-        {
-            errors.Add($"受阻猪过少：仅 {blocked}/{pigs.Count} 只被其它猪阻挡（至少 {requiredBlocked} 只）");
-        }
-
-        return errors;
-    }
+    // 生成质量门（仅作用于生成候选，不拦导入的真实关卡）：逻辑在 PiggyFarmQuality，composer 环内共用
+    public IReadOnlyList<string> QualityErrors(string levelJson) => PiggyFarmQuality.Errors(levelJson);
 
     // 求解 + 制带 + 难度评估：JSON/规则非法 → Invalid；有解 → 录制磁带；难度只对有解给档
     public PlatformSolve Solve(SolveCommand command)
